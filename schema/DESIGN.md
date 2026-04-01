@@ -1,5 +1,13 @@
 # GirlTea — Data Model Design Notes
 
+## Schema Diagram
+
+![Schema Diagram](schema-diagram.png)
+
+The full ER diagram is also available as [SVG](schema-diagram.svg) and editable [Mermaid source](schema-diagram.mmd).
+
+---
+
 ## Suggestion Assessment
 
 Below is a point-by-point review of each suggestion from the schema review, with the
