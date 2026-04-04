@@ -1,11 +1,13 @@
 -- ============================================================
 -- GirlTea App — Comments (single-level nesting)
 -- ============================================================
--- Comment types: TEXT or VOICE (3-minute cap).
--- Text comments have body; voice comments have media_url + duration.
+-- Comment types: TEXT, IMAGE, or VOICE (3-minute cap on voice).
+-- Text comments have body; image comments have media_url;
+-- voice comments have media_url + duration.
 
 CREATE TYPE comment_type AS ENUM (
     'TEXT',
+    'IMAGE',
     'VOICE'
 );
 
@@ -29,8 +31,8 @@ CREATE TABLE comments (
     CONSTRAINT chk_text_comment_has_body
         CHECK (type != 'TEXT' OR body IS NOT NULL),
 
-    CONSTRAINT chk_voice_comment_has_url
-        CHECK (type != 'VOICE' OR media_url IS NOT NULL),
+    CONSTRAINT chk_media_comment_has_url
+        CHECK (type = 'TEXT' OR media_url IS NOT NULL),
 
     CONSTRAINT chk_voice_comment_has_duration
         CHECK (type != 'VOICE' OR duration_seconds IS NOT NULL),

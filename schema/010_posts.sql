@@ -1,13 +1,14 @@
 -- ============================================================
 -- GirlTea App — Posts (rants, stories, etc.)
 -- ============================================================
--- Post types: TEXT, VIDEO, VOICE
+-- Post types: TEXT, IMAGE, VIDEO, VOICE
 -- VIDEO and VOICE are capped at 180 seconds (3 minutes).
--- Each video/voice is a standalone post — no mixing media in
+-- Each media post is standalone — no mixing media types in
 -- a single post.
 
 CREATE TYPE post_type AS ENUM (
     'TEXT',
+    'IMAGE',
     'VIDEO',
     'VOICE'
 );
@@ -38,8 +39,8 @@ CREATE TABLE posts (
     CONSTRAINT chk_media_post_has_url
         CHECK (type = 'TEXT' OR media_url IS NOT NULL),
 
-    CONSTRAINT chk_media_post_has_duration
-        CHECK (type = 'TEXT' OR duration_seconds IS NOT NULL),
+    CONSTRAINT chk_timed_media_has_duration
+        CHECK (type NOT IN ('VIDEO', 'VOICE') OR duration_seconds IS NOT NULL),
 
     CONSTRAINT chk_duration_max_180s
         CHECK (duration_seconds IS NULL OR (duration_seconds > 0 AND duration_seconds <= 180)),
