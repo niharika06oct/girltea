@@ -1,0 +1,167 @@
+erDiagram
+
+    users {
+        UUID id PK
+        TEXT auth_subject UK
+        TEXT display_name
+        DATE date_of_birth
+        gender gender
+        TEXT gender_self_describe
+        employment_status employment_status
+        TEXT profession
+        TEXT locale
+        TEXT country_code
+        TEXT in_app_alias
+        INT karma
+        BOOLEAN is_deleted
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        TIMESTAMPTZ deleted_at
+    }
+
+    groups {
+        UUID id PK
+        TEXT name
+        TEXT description
+        group_policy policy
+        group_visibility visibility
+        TEXT_ARRAY category_tags
+        UUID created_by_user_id FK
+        INT member_count
+        JSONB settings
+        BOOLEAN is_deleted
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        TIMESTAMPTZ deleted_at
+    }
+
+    group_memberships {
+        UUID group_id PK_FK
+        UUID user_id PK_FK
+        membership_role role
+        membership_status status
+        TIMESTAMPTZ joined_at
+        TIMESTAMPTZ updated_at
+    }
+
+    group_invites {
+        UUID id PK
+        UUID group_id FK
+        TEXT token_hash UK
+        UUID created_by_user_id FK
+        TIMESTAMPTZ expires_at
+        INT max_uses
+        INT use_count
+        TIMESTAMPTZ revoked_at
+        TIMESTAMPTZ created_at
+    }
+
+    group_entry_questions {
+        UUID id PK
+        UUID group_id FK
+        INT sort_order
+        TEXT prompt
+        entry_question_type question_type
+        JSONB options
+        BOOLEAN is_required
+        INT version
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    group_join_requests {
+        UUID id PK
+        UUID group_id FK
+        UUID requester_user_id FK
+        join_request_status status
+        join_request_source source
+        UUID invite_id FK
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ expires_at
+        TIMESTAMPTZ resolved_at
+    }
+
+    group_join_request_answers {
+        UUID id PK
+        UUID join_request_id FK
+        UUID question_id FK
+        INT question_version
+        TEXT answer_text
+        TIMESTAMPTZ created_at
+    }
+
+    group_join_votes {
+        UUID id PK
+        UUID join_request_id FK
+        UUID voter_user_id FK
+        vote_decision vote
+        membership_role voter_role
+        TIMESTAMPTZ created_at
+    }
+
+    posts {
+        UUID id PK
+        UUID group_id FK
+        UUID author_user_id FK
+        TEXT author_alias
+        post_type type
+        TEXT body
+        TEXT media_url
+        INT upvote_count
+        BOOLEAN is_deleted
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        TIMESTAMPTZ deleted_at
+    }
+
+    comments {
+        UUID id PK
+        UUID post_id FK
+        UUID author_user_id FK
+        TEXT author_alias
+        TEXT body
+        BOOLEAN is_deleted
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        TIMESTAMPTZ deleted_at
+    }
+
+    reports {
+        UUID id PK
+        report_target_type target_type
+        UUID target_id
+        UUID reporter_user_id FK
+        TEXT reason
+        BOOLEAN resolved
+        TIMESTAMPTZ resolved_at
+        TIMESTAMPTZ created_at
+    }
+
+    %% ---- Relationships ----
+
+    users ||--o{ groups : "creates"
+    users ||--o{ group_memberships : "is member of"
+    groups ||--o{ group_memberships : "has members"
+
+    users ||--o{ group_invites : "creates"
+    groups ||--o{ group_invites : "has invite links"
+
+    groups ||--o{ group_entry_questions : "defines questions"
+
+    users ||--o{ group_join_requests : "requests to join"
+    groups ||--o{ group_join_requests : "receives requests"
+    group_invites ||--o{ group_join_requests : "used via"
+
+    group_join_requests ||--o{ group_join_request_answers : "has answers"
+    group_entry_questions ||--o{ group_join_request_answers : "answered by"
+
+    group_join_requests ||--o{ group_join_votes : "voted on"
+    users ||--o{ group_join_votes : "casts vote"
+
+    groups ||--o{ posts : "contains"
+    users ||--o{ posts : "writes"
+
+    posts ||--o{ comments : "has"
+    users ||--o{ comments : "writes"
+
+    users ||--o{ reports : "files"

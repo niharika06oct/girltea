@@ -28,6 +28,14 @@ The PostgreSQL schema lives in `schema/` and is split into numbered migration fi
 See `schema/DESIGN.md` for the full rationale behind each design decision, the
 suggestion assessment, and the approval/visibility/policy matrices.
 
+### Schema Diagram
+
+![Schema Diagram](schema/schema-diagram.png)
+
+The diagram shows all 11 tables, every column with its type, and all foreign key
+relationships. Also available as [SVG](schema/schema-diagram.svg) and editable
+[Mermaid source](schema/schema-diagram.mmd).
+
 ## Key Concepts
 
 - **Group policies**: `WOMEN_ONLY`, `MIXED`, `GENDER_NEUTRAL` — controls who can request to join
