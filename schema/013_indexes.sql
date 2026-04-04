@@ -59,10 +59,17 @@ CREATE INDEX idx_join_votes_request ON group_join_votes (join_request_id, vote);
 CREATE INDEX idx_posts_group_feed ON posts (group_id, created_at DESC)
     WHERE is_deleted = FALSE;
 
+-- Filter by type (e.g. "show only videos in this group")
+CREATE INDEX idx_posts_group_type ON posts (group_id, type, created_at DESC)
+    WHERE is_deleted = FALSE;
+
 CREATE INDEX idx_posts_author ON posts (author_user_id);
 
 -- ---- Comments ----
 CREATE INDEX idx_comments_post ON comments (post_id, created_at)
+    WHERE is_deleted = FALSE;
+
+CREATE INDEX idx_comments_post_type ON comments (post_id, type, created_at)
     WHERE is_deleted = FALSE;
 
 -- ---- Removal Requests ----
