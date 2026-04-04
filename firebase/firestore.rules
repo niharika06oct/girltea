@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Placeholder — expand when Firestore collections are defined.
+    // For now, deny all direct client access; API layer handles reads/writes.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
