@@ -1,0 +1,111 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // -------------------------------------------------------
+    // Helper functions
+    // -------------------------------------------------------
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function isImageType() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp|gif)');
+    }
+
+    function isVideoType() {
+      return request.resource.contentType.matches('video/(mp4|quicktime|webm)');
+    }
+
+    function isAudioType() {
+      return request.resource.contentType.matches('audio/(mpeg|mp4|m4a|aac|ogg|wav|webm)');
+    }
+
+    // -------------------------------------------------------
+    // Post media: /posts/{postId}/{fileName}
+    //
+    // Images  — max 10 MB
+    // Videos  — max 100 MB
+    // Audio   — max 10 MB
+    // -------------------------------------------------------
+
+    match /posts/{postId}/{fileName} {
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+        && (
+          (isImageType() && request.resource.size < 10 * 1024 * 1024)
+          || (isVideoType() && request.resource.size < 100 * 1024 * 1024)
+          || (isAudioType() && request.resource.size < 10 * 1024 * 1024)
+        );
+
+      allow delete: if isAuthenticated();
+    }
+
+    // -------------------------------------------------------
+    // Post thumbnails: /posts/{postId}/thumbnails/{fileName}
+    //
+    // Images only — max 2 MB
+    // -------------------------------------------------------
+
+    match /posts/{postId}/thumbnails/{fileName} {
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+        && isImageType()
+        && request.resource.size < 2 * 1024 * 1024;
+
+      allow delete: if isAuthenticated();
+    }
+
+    // -------------------------------------------------------
+    // Comment media: /comments/{commentId}/{fileName}
+    //
+    // Images  — max 10 MB
+    // Audio   — max 10 MB (voice comments)
+    // -------------------------------------------------------
+
+    match /comments/{commentId}/{fileName} {
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+        && (
+          (isImageType() && request.resource.size < 10 * 1024 * 1024)
+          || (isAudioType() && request.resource.size < 10 * 1024 * 1024)
+        );
+
+      allow delete: if isAuthenticated();
+    }
+
+    // -------------------------------------------------------
+    // Temporary uploads: /temp/{uid}/{uploadId}/{fileName}
+    //
+    // Users can upload to their own temp folder.
+    // A scheduled Cloud Function cleans files older than 24h.
+    // -------------------------------------------------------
+
+    match /temp/{uid}/{uploadId}/{fileName} {
+      allow read: if isAuthenticated() && isOwner(uid);
+
+      allow create: if isAuthenticated()
+        && isOwner(uid)
+        && request.resource.size < 100 * 1024 * 1024;
+
+      allow delete: if isAuthenticated() && isOwner(uid);
+    }
+
+    // -------------------------------------------------------
+    // Deny everything else by default
+    // -------------------------------------------------------
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

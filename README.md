@@ -49,3 +49,24 @@ relationships. Also available as [SVG](schema/schema-diagram.svg) and editable
 - **Content types**: Posts support text, image, video, and voice (each as a standalone post); comments support text, image, and voice — video/voice capped at 3 minutes via DB constraints
 - **Entry questions**: Groups can define questionnaires; answers are shown to voters
 - **Soft deletes**: Users, groups, posts, and comments support reversible deletion
+
+## Firebase Storage
+
+Media files (images, videos, voice recordings) are stored in Firebase Cloud Storage.
+The database only stores URL references (`media_url`, `thumbnail_url`).
+
+| File | Purpose |
+|---|---|
+| `firebase.json` | Firebase project config |
+| `firebase/storage.rules` | Storage security rules (auth, file type, size limits) |
+| `firebase/firestore.rules` | Firestore rules (placeholder, deny-all for now) |
+| `firebase/STORAGE.md` | Full storage architecture: upload flow, bucket structure, MIME types, cost notes |
+
+### File size limits (enforced in Storage rules)
+
+| Content type | Max size |
+|---|---|
+| Image (post or comment) | 10 MB |
+| Video (post only) | 100 MB |
+| Voice (post or comment) | 10 MB |
+| Thumbnail | 2 MB |
