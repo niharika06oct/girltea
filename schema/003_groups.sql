@@ -28,7 +28,10 @@ CREATE TABLE groups (
         "memberApprovalMaxGroupSize": 20,
         "largeGroupApprovalMode": "ADMINS_ONLY",
         "joinRequestTtlHours": 336,
-        "allowInviteLink": true
+        "allowInviteLink": true,
+        "removalQuorum": 2,
+        "removalRequestTtlHours": 168,
+        "democraticThreshold": 10
     }'::jsonb,
 
     is_deleted          BOOLEAN NOT NULL DEFAULT FALSE,
