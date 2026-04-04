@@ -65,6 +65,21 @@ CREATE INDEX idx_posts_author ON posts (author_user_id);
 CREATE INDEX idx_comments_post ON comments (post_id, created_at)
     WHERE is_deleted = FALSE;
 
+-- ---- Removal Requests ----
+CREATE INDEX idx_removal_requests_group_pending ON group_removal_requests (group_id, status)
+    WHERE status = 'PENDING';
+
+CREATE UNIQUE INDEX uq_one_pending_removal_per_target
+    ON group_removal_requests (group_id, target_user_id)
+    WHERE status = 'PENDING';
+
+CREATE INDEX idx_removal_requests_target ON group_removal_requests (target_user_id, status);
+CREATE INDEX idx_removal_requests_expires ON group_removal_requests (expires_at)
+    WHERE status = 'PENDING';
+
+-- ---- Removal Votes ----
+CREATE INDEX idx_removal_votes_request ON group_removal_votes (removal_request_id, vote);
+
 -- ---- Reports ----
 CREATE INDEX idx_reports_target ON reports (target_type, target_id);
 CREATE INDEX idx_reports_unresolved ON reports (created_at)

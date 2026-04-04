@@ -75,6 +75,14 @@ CREATE TYPE vote_decision AS ENUM (
     'REJECT'
 );
 
+CREATE TYPE removal_request_status AS ENUM (
+    'PENDING',
+    'APPROVED',
+    'REJECTED',
+    'EXPIRED',
+    'CANCELLED'
+);
+
 CREATE TYPE report_target_type AS ENUM (
     'POST',
     'COMMENT',

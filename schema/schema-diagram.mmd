@@ -126,6 +126,27 @@ erDiagram
         TIMESTAMPTZ deleted_at
     }
 
+    group_removal_requests {
+        UUID id PK
+        UUID group_id FK
+        UUID target_user_id FK
+        UUID requested_by_user_id FK
+        TEXT reason
+        removal_request_status status
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ expires_at
+        TIMESTAMPTZ resolved_at
+    }
+
+    group_removal_votes {
+        UUID id PK
+        UUID removal_request_id FK
+        UUID voter_user_id FK
+        vote_decision vote
+        membership_role voter_role
+        TIMESTAMPTZ created_at
+    }
+
     reports {
         UUID id PK
         report_target_type target_type
@@ -157,6 +178,13 @@ erDiagram
 
     group_join_requests ||--o{ group_join_votes : "voted on"
     users ||--o{ group_join_votes : "casts vote"
+
+    groups ||--o{ group_removal_requests : "has removal requests"
+    users ||--o{ group_removal_requests : "targeted by"
+    users ||--o{ group_removal_requests : "raises"
+
+    group_removal_requests ||--o{ group_removal_votes : "voted on"
+    users ||--o{ group_removal_votes : "casts removal vote"
 
     groups ||--o{ posts : "contains"
     users ||--o{ posts : "writes"

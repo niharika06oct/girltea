@@ -71,22 +71,29 @@ BEFORE UPDATE ON group_entry_questions
 FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 
--- ---- Auto-expire stale join requests ----
--- This would typically run as a scheduled job (pg_cron or app-level),
--- but here is the function it would call:
+-- ---- Auto-expire stale requests ----
+-- Typically run as a scheduled job (pg_cron or app-level).
 
-CREATE OR REPLACE FUNCTION fn_expire_stale_join_requests()
-RETURNS INT AS $$
+CREATE OR REPLACE FUNCTION fn_expire_stale_requests()
+RETURNS TABLE (expired_join INT, expired_removal INT) AS $$
 DECLARE
-    affected INT;
+    v_join INT;
+    v_removal INT;
 BEGIN
     UPDATE group_join_requests
     SET status = 'EXPIRED',
         resolved_at = now()
     WHERE status = 'PENDING'
       AND expires_at < now();
+    GET DIAGNOSTICS v_join = ROW_COUNT;
 
-    GET DIAGNOSTICS affected = ROW_COUNT;
-    RETURN affected;
+    UPDATE group_removal_requests
+    SET status = 'EXPIRED',
+        resolved_at = now()
+    WHERE status = 'PENDING'
+      AND expires_at < now();
+    GET DIAGNOSTICS v_removal = ROW_COUNT;
+
+    RETURN QUERY SELECT v_join, v_removal;
 END;
 $$ LANGUAGE plpgsql;

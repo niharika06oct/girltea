@@ -71,6 +71,69 @@ decision (adopted, deferred, or skipped) and rationale.
 
 ---
 
+## Democratic Authority Model
+
+No single person has unilateral power in a group. All high-impact actions require
+consensus from at least two members, especially in small trusted circles.
+
+### Guiding Principle
+
+> For groups under the democratic threshold (default 10 members), every member is
+> equal. OWNER/ADMIN roles exist for coordination in larger groups, not for
+> authority in small ones.
+
+### Admission: always requires 2+ approvers
+
+| Group size | Who can vote | Quorum |
+|---|---|---|
+| Below `democraticThreshold` (< 10) | Any active member | 2 (minimum, cannot be lowered) |
+| Above threshold, `MEMBERS_QUORUM` | Any active member | `memberApproverQuorum` from settings |
+| Above threshold, `ADMINS_ONLY` | OWNER / ADMIN only | `memberApproverQuorum` from settings |
+| Above threshold, `HYBRID` below `memberApprovalMaxGroupSize` | Any active member | `memberApproverQuorum` from settings |
+| Above threshold, `HYBRID` above `memberApprovalMaxGroupSize` | Falls back to `largeGroupApprovalMode` | `memberApproverQuorum` from settings |
+
+### Removal: raise + second approval
+
+Any member can raise a request to remove another member. The requester's intent
+automatically counts as the first APPROVE vote. One more member must approve for the
+removal to go through (for groups under the democratic threshold).
+
+```
+Member A raises removal request against Member B
+        │
+        ▼
+group_removal_requests row created (PENDING)
+  + auto-vote: Member A → APPROVE (counted as vote #1)
+        │
+        ▼
+Other members see the request + reason
+        │
+        ▼
+Member C votes APPROVE → quorum (2) reached
+        │
+        ▼
+Member B's membership status → BANNED
+```
+
+| Group size | Quorum for removal |
+|---|---|
+| Below `democraticThreshold` (< 10) | 2 (requester + 1 other) |
+| Above threshold | `removalQuorum` from settings (configurable) |
+
+### What no single person can do
+
+- Admit someone alone (always 2+ approvers)
+- Remove someone alone (always requester + 1 other)
+- Override a vote outcome
+
+### Settings changes (future consideration)
+
+For MVP, group settings are set at creation time. Changing settings (policy, visibility,
+approval rules) can later be gated behind a vote as well, consistent with the democratic
+model. This keeps the schema simple now without blocking the design direction.
+
+---
+
 ## Approval Flow Summary
 
 ```
@@ -111,7 +174,15 @@ fn_cast_join_vote(request, voter, APPROVE/REJECT)
 
 | `member_count` vs `settings` | Effective rule |
 |---|---|
-| `approvalMode = MEMBERS_QUORUM` | Any N active members can approve |
-| `approvalMode = ADMINS_ONLY` | Only OWNER / ADMIN can approve |
-| `approvalMode = HYBRID` and `member_count < memberApprovalMaxGroupSize` | Any N active members can approve |
-| `approvalMode = HYBRID` and `member_count >= memberApprovalMaxGroupSize` | Falls back to `largeGroupApprovalMode` (typically ADMINS_ONLY) |
+| `member_count < democraticThreshold` (any mode) | All members equal; any 2+ active members can approve; no single-person override |
+| `member_count >= democraticThreshold`, `approvalMode = MEMBERS_QUORUM` | Any N active members can approve |
+| `member_count >= democraticThreshold`, `approvalMode = ADMINS_ONLY` | Only OWNER / ADMIN can approve |
+| `member_count >= democraticThreshold`, `approvalMode = HYBRID` and below `memberApprovalMaxGroupSize` | Any N active members can approve |
+| `member_count >= democraticThreshold`, `approvalMode = HYBRID` and above `memberApprovalMaxGroupSize` | Falls back to `largeGroupApprovalMode` (typically ADMINS_ONLY) |
+
+## Removal Flow
+
+| `member_count` vs `settings` | Effective rule |
+|---|---|
+| `member_count < democraticThreshold` | Requester + 1 other member (quorum = 2, cannot be lowered) |
+| `member_count >= democraticThreshold` | `removalQuorum` from settings (default 2, configurable higher) |

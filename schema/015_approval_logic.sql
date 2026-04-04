@@ -68,17 +68,23 @@ BEGIN
     FROM groups g
     WHERE g.id = v_group_id;
 
-    v_quorum := COALESCE((v_settings->>'memberApproverQuorum')::INT, 2);
     v_approval_mode := COALESCE(v_settings->>'approvalMode', 'HYBRID');
     v_max_size := COALESCE((v_settings->>'memberApprovalMaxGroupSize')::INT, 20);
 
-    -- Enforce approval mode: if ADMINS_ONLY or HYBRID with large group,
-    -- only OWNER/ADMIN can vote
-    IF v_approval_mode = 'ADMINS_ONLY'
-       OR (v_approval_mode = 'HYBRID' AND v_member_count >= v_max_size) THEN
-        IF v_voter_role NOT IN ('OWNER', 'ADMIN') THEN
-            RAISE EXCEPTION 'Only admins can approve in this group (mode: %, size: %)',
-                v_approval_mode, v_member_count;
+    -- Democratic model: for groups below democraticThreshold (default 10),
+    -- all members are equal — no single-person authority. Quorum is always
+    -- at least 2 regardless of role.
+    IF v_member_count < COALESCE((v_settings->>'democraticThreshold')::INT, 10) THEN
+        v_quorum := GREATEST(COALESCE((v_settings->>'memberApproverQuorum')::INT, 2), 2);
+    ELSE
+        v_quorum := COALESCE((v_settings->>'memberApproverQuorum')::INT, 2);
+
+        IF v_approval_mode = 'ADMINS_ONLY'
+           OR (v_approval_mode = 'HYBRID' AND v_member_count >= v_max_size) THEN
+            IF v_voter_role NOT IN ('OWNER', 'ADMIN') THEN
+                RAISE EXCEPTION 'Only admins can approve in this group (mode: %, size: %)',
+                    v_approval_mode, v_member_count;
+            END IF;
         END IF;
     END IF;
 
