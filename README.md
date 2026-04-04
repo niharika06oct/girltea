@@ -18,8 +18,8 @@ The PostgreSQL schema lives in `schema/` and is split into numbered migration fi
 | `007_group_join_requests.sql` | Join requests with status, source, expiry |
 | `008_group_join_request_answers.sql` | Answers to entry questions per request |
 | `009_group_join_votes.sql` | Approval / rejection votes with role snapshot |
-| `010_posts.sql` | Posts (text, image, audio) with soft-delete |
-| `011_comments.sql` | Single-level comments on posts |
+| `010_posts.sql` | Posts (text, image, video, voice) with 3-min cap on video/voice |
+| `011_comments.sql` | Text, image, and voice comments (3-min voice cap) on posts |
 | `012_reports.sql` | Moderation reports |
 | `013_indexes.sql` | All indexes (partial, GIN, composite) |
 | `014_triggers.sql` | Triggers for member count, updated_at, request expiry |
@@ -46,5 +46,6 @@ relationships. Also available as [SVG](schema/schema-diagram.svg) and editable
 - **Democratic authority**: No single person has unilateral power; all high-impact actions (admission, removal) require at least 2 members to agree, especially in groups under 10 members
 - **Approval flow**: Configurable quorum (default 2 approvers); switches to admin-only above a configurable group size
 - **Removal flow**: Any member can raise a removal request; their intent counts as vote #1, one more member must approve
+- **Content types**: Posts support text, image, video, and voice (each as a standalone post); comments support text, image, and voice — video/voice capped at 3 minutes via DB constraints
 - **Entry questions**: Groups can define questionnaires; answers are shown to voters
 - **Soft deletes**: Users, groups, posts, and comments support reversible deletion

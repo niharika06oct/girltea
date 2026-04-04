@@ -8,6 +8,38 @@ The full ER diagram is also available as [SVG](schema-diagram.svg) and editable 
 
 ---
 
+## Content Model (Posts & Comments)
+
+### Posts
+
+Each post is one of four types — no mixing media within a single post:
+
+| Type | Required fields | Constraints |
+|---|---|---|
+| `TEXT` | `body` | — |
+| `IMAGE` | `media_url` | — |
+| `VIDEO` | `media_url`, `duration_seconds` | Max 180 seconds (3 minutes) |
+| `VOICE` | `media_url`, `duration_seconds` | Max 180 seconds (3 minutes) |
+
+- `thumbnail_url` is optional on video posts (for feed previews)
+- `body` can optionally accompany any media post as a caption
+- DB CHECK constraints enforce: text posts must have body, media posts must have URL, video/voice must have duration, duration cannot exceed 180s
+
+### Comments
+
+Comments on any post type support text, image, and voice:
+
+| Type | Required fields | Constraints |
+|---|---|---|
+| `TEXT` | `body` | — |
+| `IMAGE` | `media_url` | — |
+| `VOICE` | `media_url`, `duration_seconds` | Max 180 seconds (3 minutes) |
+
+- No video comments — keeps the comment thread lightweight
+- Single-level nesting (no replies to replies)
+
+---
+
 ## Suggestion Assessment
 
 Below is a point-by-point review of each suggestion from the schema review, with the

@@ -107,6 +107,8 @@ erDiagram
         post_type type
         TEXT body
         TEXT media_url
+        INT duration_seconds
+        TEXT thumbnail_url
         INT upvote_count
         BOOLEAN is_deleted
         TIMESTAMPTZ created_at
@@ -119,7 +121,10 @@ erDiagram
         UUID post_id FK
         UUID author_user_id FK
         TEXT author_alias
+        comment_type type
         TEXT body
+        TEXT media_url
+        INT duration_seconds
         BOOLEAN is_deleted
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
