@@ -50,23 +50,22 @@ relationships. Also available as [SVG](schema/schema-diagram.svg) and editable
 - **Entry questions**: Groups can define questionnaires; answers are shown to voters
 - **Soft deletes**: Users, groups, posts, and comments support reversible deletion
 
-## Firebase Storage
+## Supabase Storage
 
-Media files (images, videos, voice recordings) are stored in Firebase Cloud Storage.
-The database only stores URL references (`media_url`, `thumbnail_url`).
+Media files (images, videos, voice recordings) are stored in **Supabase Storage**
+(free: 1 GB storage, 2 GB bandwidth/month, no credit card required). The database
+only stores URL references (`media_url`, `thumbnail_url`).
 
 | File | Purpose |
 |---|---|
-| `firebase.json` | Firebase project config |
-| `firebase/storage.rules` | Storage security rules (auth, file type, size limits) |
-| `firebase/firestore.rules` | Firestore rules (placeholder, deny-all for now) |
-| `firebase/STORAGE.md` | Full storage architecture: upload flow, bucket structure, MIME types, cost notes |
+| `supabase/storage_buckets.sql` | Creates the three storage buckets (run once in SQL Editor) |
+| `supabase/storage_policies.sql` | RLS policies controlling upload/read/delete access |
+| `supabase/STORAGE.md` | Full architecture: upload flow, bucket structure, setup instructions |
 
-### File size limits (enforced in Storage rules)
+### Buckets and limits
 
-| Content type | Max size |
-|---|---|
-| Image (post or comment) | 10 MB |
-| Video (post only) | 100 MB |
-| Voice (post or comment) | 10 MB |
-| Thumbnail | 2 MB |
+| Bucket | Contents | Max file size |
+|---|---|---|
+| `post-media` | Images, videos, voice for posts | 100 MB |
+| `post-thumbnails` | Video thumbnail previews | 2 MB |
+| `comment-media` | Images, voice for comments | 10 MB |
