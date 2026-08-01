@@ -51,6 +51,22 @@ relationships. Also available as [SVG](schema/schema-diagram.svg) and editable
 - **Entry questions**: Groups can define questionnaires; answers are shown to voters
 - **Soft deletes**: Users, groups, posts, and comments support reversible deletion
 
+## Authentication
+
+Phone/email OTP via **Supabase Auth** — no passwords, no social login.
+
+| File | Purpose |
+|---|---|
+| `supabase/auth_setup.sql` | Links `users.id` to `auth.users.id`, helper functions |
+| `supabase/rls_policies.sql` | Row Level Security policies for all 14 tables |
+| `supabase/AUTH.md` | Full auth setup: OTP config, Flutter code examples, SMS costs |
+
+Flow: Enter phone/email → receive OTP → verify → if no profile yet, complete
+onboarding (name, DOB, gender, employment) → proceed to group hub.
+
+RLS ensures users can only read/write data they're authorized to access (own profile,
+groups they belong to, posts in their groups, etc.).
+
 ## Supabase Storage
 
 Media files (images, videos, voice recordings) are stored in **Supabase Storage**
