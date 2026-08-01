@@ -152,6 +152,12 @@ erDiagram
         TIMESTAMPTZ created_at
     }
 
+    post_upvotes {
+        UUID post_id PK_FK
+        UUID user_id PK_FK
+        TIMESTAMPTZ created_at
+    }
+
     reports {
         UUID id PK
         report_target_type target_type
@@ -193,6 +199,9 @@ erDiagram
 
     groups ||--o{ posts : "contains"
     users ||--o{ posts : "writes"
+
+    posts ||--o{ post_upvotes : "upvoted via"
+    users ||--o{ post_upvotes : "upvotes"
 
     posts ||--o{ comments : "has"
     users ||--o{ comments : "writes"

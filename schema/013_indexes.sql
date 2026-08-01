@@ -65,6 +65,11 @@ CREATE INDEX idx_posts_group_type ON posts (group_id, type, created_at DESC)
 
 CREATE INDEX idx_posts_author ON posts (author_user_id);
 
+-- ---- Post Upvotes ----
+-- "Did this user already upvote this post?" — covered by PK (post_id, user_id)
+-- "All posts a user upvoted" (for profile / history)
+CREATE INDEX idx_upvotes_user ON post_upvotes (user_id, created_at DESC);
+
 -- ---- Comments ----
 CREATE INDEX idx_comments_post ON comments (post_id, created_at)
     WHERE is_deleted = FALSE;

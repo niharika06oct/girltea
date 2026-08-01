@@ -27,6 +27,7 @@ The PostgreSQL schema lives in `schema/` and is split into numbered migration fi
 | `016_group_removal_requests.sql` | Democratic member removal requests |
 | `017_group_removal_votes.sql` | Votes on removal requests |
 | `018_removal_logic.sql` | Transactional removal vote + ban function |
+| `019_post_upvotes.sql` | Upvote tracking (prevents double-taps, trigger-maintained count) |
 
 See `schema/DESIGN.md` for the full rationale behind each design decision, the
 suggestion assessment, and the approval/visibility/policy matrices.
@@ -35,7 +36,7 @@ suggestion assessment, and the approval/visibility/policy matrices.
 
 ![Schema Diagram](schema/schema-diagram.png)
 
-The diagram shows all 13 tables, every column with its type, and all foreign key
+The diagram shows all 14 tables, every column with its type, and all foreign key
 relationships. Also available as [SVG](schema/schema-diagram.svg) and editable
 [Mermaid source](schema/schema-diagram.mmd).
 

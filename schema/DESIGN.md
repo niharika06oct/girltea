@@ -38,6 +38,12 @@ Comments on any post type support text, image, and voice:
 - No video comments — keeps the comment thread lightweight
 - Single-level nesting (no replies to replies)
 
+### Upvotes (tea drops)
+
+`post_upvotes` tracks who upvoted which post via a composite PK `(post_id, user_id)`.
+This prevents double-tapping at the database level. A trigger on insert/delete
+atomically maintains the denormalized `posts.upvote_count`.
+
 ---
 
 ## Suggestion Assessment

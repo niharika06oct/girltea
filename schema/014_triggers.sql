@@ -71,6 +71,28 @@ BEFORE UPDATE ON group_entry_questions
 FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 
+-- ---- Auto-update upvote_count on posts ----
+
+CREATE OR REPLACE FUNCTION fn_update_post_upvote_count()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        UPDATE posts SET upvote_count = upvote_count + 1
+        WHERE id = NEW.post_id;
+    ELSIF TG_OP = 'DELETE' THEN
+        UPDATE posts SET upvote_count = GREATEST(upvote_count - 1, 0)
+        WHERE id = OLD.post_id;
+    END IF;
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_post_upvote_count
+AFTER INSERT OR DELETE ON post_upvotes
+FOR EACH ROW EXECUTE FUNCTION fn_update_post_upvote_count();
+
+
 -- ---- Auto-expire stale requests ----
 -- Typically run as a scheduled job (pg_cron or app-level).
 
