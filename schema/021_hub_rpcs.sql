@@ -186,6 +186,16 @@ BEGIN
         RAISE EXCEPTION 'Gender policy does not allow joining this group';
     END IF;
 
+    -- FIX #2: Block BANNED users from re-requesting
+    PERFORM 1 FROM group_memberships
+    WHERE group_id = p_group_id
+      AND user_id = v_caller
+      AND status = 'BANNED';
+
+    IF FOUND THEN
+        RAISE EXCEPTION 'You are banned from this group';
+    END IF;
+
     PERFORM 1 FROM group_memberships
     WHERE group_id = p_group_id
       AND user_id = v_caller

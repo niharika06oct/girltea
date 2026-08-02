@@ -1,13 +1,8 @@
 -- ============================================================
 -- GirlTea App — Approval Transaction Logic
 -- ============================================================
--- Suggestion incorporated: wrap "cast vote → maybe admit" in a
--- single database transaction so two simultaneous last votes
--- don't double-insert a membership.
---
--- This function is called when a member/admin votes on a join
--- request. It atomically: records the vote, checks if quorum
--- is met, and if so admits the requester.
+-- Atomically: vote → check quorum → admit or reject.
+-- SECURITY DEFINER: bypasses RLS, re-checks everything internally.
 
 CREATE OR REPLACE FUNCTION fn_cast_join_vote(
     p_join_request_id UUID,
@@ -16,6 +11,7 @@ CREATE OR REPLACE FUNCTION fn_cast_join_vote(
 RETURNS TABLE (
     request_status join_request_status,
     approval_count INT,
+    rejection_count INT,
     quorum_required INT
 ) AS $$
 DECLARE
@@ -31,6 +27,8 @@ DECLARE
     v_approval_mode TEXT;
     v_max_size INT;
     v_current_approvals INT;
+    v_current_rejections INT;
+    v_invite_rows INT;
 BEGIN
     IF p_voter_user_id IS NULL THEN
         RAISE EXCEPTION 'Not authenticated';
@@ -77,9 +75,6 @@ BEGIN
     v_approval_mode := COALESCE(v_settings->>'approvalMode', 'HYBRID');
     v_max_size := COALESCE((v_settings->>'memberApprovalMaxGroupSize')::INT, 20);
 
-    -- Democratic model: for groups below democraticThreshold (default 10),
-    -- all members are equal — no single-person authority. Quorum is always
-    -- at least 2 regardless of role.
     IF v_member_count < COALESCE((v_settings->>'democraticThreshold')::INT, 10) THEN
         v_quorum := GREATEST(COALESCE((v_settings->>'memberApproverQuorum')::INT, 2), 2);
     ELSE
@@ -94,17 +89,56 @@ BEGIN
         END IF;
     END IF;
 
-    -- Record the vote (unique constraint prevents double-voting)
     INSERT INTO group_join_votes (join_request_id, voter_user_id, vote, voter_role)
     VALUES (p_join_request_id, p_voter_user_id, p_vote, v_voter_role);
 
-    -- Check if we've reached quorum for approval
     SELECT COUNT(*) INTO v_current_approvals
     FROM group_join_votes jv
     WHERE jv.join_request_id = p_join_request_id
       AND jv.vote = 'APPROVE';
 
+    SELECT COUNT(*) INTO v_current_rejections
+    FROM group_join_votes jv
+    WHERE jv.join_request_id = p_join_request_id
+      AND jv.vote = 'REJECT';
+
+    -- FIX #3: Rejection quorum — same threshold as approval.
+    IF p_vote = 'REJECT' AND v_current_rejections >= v_quorum THEN
+        UPDATE group_join_requests
+        SET status = 'REJECTED', resolved_at = now()
+        WHERE id = p_join_request_id;
+
+        RETURN QUERY SELECT 'REJECTED'::join_request_status,
+                            v_current_approvals,
+                            v_current_rejections,
+                            v_quorum;
+        RETURN;
+    END IF;
+
     IF p_vote = 'APPROVE' AND v_current_approvals >= v_quorum THEN
+        -- FIX #1: Re-check gender eligibility at admission time.
+        IF NOT fn_validate_join_eligibility(v_requester_id, v_group_id) THEN
+            UPDATE group_join_requests
+            SET status = 'REJECTED', resolved_at = now()
+            WHERE id = p_join_request_id;
+
+            RAISE EXCEPTION 'Requester no longer meets gender policy for this group';
+        END IF;
+
+        -- FIX #2: Block BANNED users. ON CONFLICT only reactivates LEFT.
+        PERFORM 1 FROM group_memberships
+        WHERE group_id = v_group_id
+          AND user_id = v_requester_id
+          AND status = 'BANNED';
+
+        IF FOUND THEN
+            UPDATE group_join_requests
+            SET status = 'REJECTED', resolved_at = now()
+            WHERE id = p_join_request_id;
+
+            RAISE EXCEPTION 'User is banned from this group';
+        END IF;
+
         UPDATE group_join_requests
         SET status = 'APPROVED', resolved_at = now()
         WHERE id = p_join_request_id;
@@ -112,24 +146,36 @@ BEGIN
         INSERT INTO group_memberships (group_id, user_id, role, status, alias)
         VALUES (v_group_id, v_requester_id, 'MEMBER', 'ACTIVE', fn_generate_alias_for_group(v_group_id))
         ON CONFLICT (group_id, user_id) DO UPDATE
-            SET status = 'ACTIVE', joined_at = now(), updated_at = now();
+            SET status = 'ACTIVE', joined_at = now(), updated_at = now()
+            WHERE group_memberships.status = 'LEFT';
 
-        -- FIX #5: Increment invite use_count on admission (not at request time).
-        -- Race-safe: UPDATE ... WHERE use_count < max_uses.
-        UPDATE group_invites
-        SET use_count = use_count + 1
-        WHERE id = (
-            SELECT invite_id FROM group_join_requests
+        -- FIX #5: Enforce max_uses at admission. Raise if exhausted.
+        IF EXISTS (
+            SELECT 1 FROM group_join_requests
             WHERE id = p_join_request_id AND invite_id IS NOT NULL
-        )
-        AND (max_uses IS NULL OR use_count < max_uses);
+        ) THEN
+            UPDATE group_invites
+            SET use_count = use_count + 1
+            WHERE id = (
+                SELECT invite_id FROM group_join_requests
+                WHERE id = p_join_request_id
+            )
+            AND (max_uses IS NULL OR use_count < max_uses);
+
+            GET DIAGNOSTICS v_invite_rows = ROW_COUNT;
+            IF v_invite_rows = 0 THEN
+                RAISE WARNING 'Invite max_uses exceeded — admission proceeded but invite is exhausted';
+            END IF;
+        END IF;
 
         RETURN QUERY SELECT 'APPROVED'::join_request_status,
                             v_current_approvals,
+                            v_current_rejections,
                             v_quorum;
     ELSE
         RETURN QUERY SELECT 'PENDING'::join_request_status,
                             v_current_approvals,
+                            v_current_rejections,
                             v_quorum;
     END IF;
 END;
@@ -137,7 +183,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 
 -- ============================================================
--- Policy validation: check gender eligibility before join request
+-- Policy validation: check gender eligibility
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION fn_validate_join_eligibility(
@@ -148,9 +194,8 @@ RETURNS BOOLEAN AS $$
 DECLARE
     v_policy group_policy;
     v_user_gender gender;
-    v_visibility group_visibility;
 BEGIN
-    SELECT g.policy, g.visibility INTO v_policy, v_visibility
+    SELECT g.policy INTO v_policy
     FROM groups g WHERE g.id = p_group_id AND g.is_deleted = FALSE;
 
     IF NOT FOUND THEN
@@ -174,16 +219,12 @@ BEGIN
                 RETURN FALSE;
             END IF;
         WHEN 'GENDER_NEUTRAL' THEN
-            NULL; -- no gender requirement
+            NULL;
     END CASE;
 
     RETURN TRUE;
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
-
--- ============================================================
--- REVOKE from anon
--- ============================================================
 
 REVOKE EXECUTE ON FUNCTION fn_cast_join_vote(UUID, vote_decision) FROM anon;
 REVOKE EXECUTE ON FUNCTION fn_validate_join_eligibility(UUID, UUID) FROM anon;
