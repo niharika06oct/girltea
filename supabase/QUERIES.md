@@ -515,10 +515,63 @@ await supabase.from('group_entry_questions').update({
 
 ---
 
-## Things to build as RPCs (not yet created)
+## Hub RPCs (schema/021_hub_rpcs.sql)
+
+### Create a group
+
+```dart
+final groupId = await supabase.rpc('fn_create_group_with_owner', params: {
+  'p_name': name,
+  'p_description': description,
+  'p_policy': 'WOMEN_ONLY',
+  'p_visibility': 'LINK_ONLY',
+  'p_category_tags': ['school_friends', 'rant'],
+});
+```
+
+Atomically creates group + owner membership with generated alias.
+
+### Resolve an invite link
+
+```dart
+final result = await supabase.rpc('fn_resolve_invite', params: {
+  'p_token': rawToken,  // NOT a hash — function hashes internally
+});
+// Returns: group_id, name, description, policy, member_count,
+//          questions (json), already_member, has_pending_request
+// Never returns: member list, posts, invite metadata
+```
+
+### Submit join request + answers
+
+```dart
+await supabase.rpc('fn_submit_join_request', params: {
+  'p_group_id': groupId,
+  'p_token': rawToken,        // null if not from invite
+  'p_source': 'INVITE_LINK',  // or 'SUGGESTION', 'MANUAL_SEARCH'
+  'p_answers': [
+    {'question_id': q1Id, 'question_version': 1, 'answer_text': 'Class of 2019'},
+    {'question_id': q2Id, 'question_version': 1, 'answer_text': 'Yes'},
+  ],
+});
+```
+
+Atomic: request + all answers in one transaction. Validates eligibility,
+checks for existing membership/pending request, increments invite use_count.
+
+### Get pending votes for me
+
+```dart
+final pending = await supabase.rpc('fn_pending_join_requests_for_me');
+// Returns rows: id, group_id, group_name, created_at, expires_at,
+//               approval_count, quorum, i_have_voted, answers (json)
+// Only for groups where caller is ACTIVE member.
+```
+
+---
+
+## RPCs still to build
 
 | Function | Why |
 |---|---|
-| `fn_create_group_with_owner` | Atomically create group + insert owner membership with alias |
-| `fn_resolve_invite` | SECURITY DEFINER to resolve invite token for non-members |
-| `fn_leave_group` | Set membership to LEFT, decrement count, handle last-member edge case |
+| `fn_leave_group` | Set membership to LEFT, handle last-member edge case |

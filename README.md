@@ -44,6 +44,8 @@ girltea/
 │   ├── 017_group_removal_votes.sql    ← Removal votes
 │   ├── 018_removal_logic.sql          ← Transactional removal function
 │   ├── 019_post_upvotes.sql           ← Upvote tracking
+│   ├── 020_alias_generator.sql        ← fn_generate_alias() for per-group aliases
+│   ├── 021_hub_rpcs.sql               ← Hub RPCs (create group, resolve invite, join, pending votes)
 │   ├── DESIGN.md                      ← Design decisions, flow diagrams, matrices
 │   ├── schema-diagram.png             ← ER diagram (high-res)
 │   ├── schema-diagram.svg             ← ER diagram (scalable)
@@ -54,7 +56,8 @@ girltea/
     ├── storage_buckets.sql            ← Storage bucket definitions
     ├── storage_policies.sql           ← Storage access policies
     ├── AUTH.md                        ← Auth setup guide + Flutter examples
-    └── STORAGE.md                     ← Storage architecture + setup guide
+    ├── STORAGE.md                     ← Storage architecture + setup guide
+    └── QUERIES.md                     ← Complete query reference for Flutter app
 ```
 
 ## Schema Diagram
