@@ -32,7 +32,10 @@ DECLARE
     v_max_size INT;
     v_current_approvals INT;
 BEGIN
-    -- Lock the join request row to prevent concurrent vote races
+    IF p_voter_user_id IS NULL THEN
+        RAISE EXCEPTION 'Not authenticated';
+    END IF;
+
     SELECT jr.group_id, jr.requester_user_id, jr.status
     INTO v_group_id, v_requester_id, v_request_status
     FROM group_join_requests jr
@@ -51,7 +54,6 @@ BEGIN
         RAISE EXCEPTION 'Requester cannot vote on their own request';
     END IF;
 
-    -- Verify voter is an active member of the group and get their role
     SELECT gm.role INTO v_voter_role
     FROM group_memberships gm
     WHERE gm.group_id = v_group_id
@@ -62,11 +64,15 @@ BEGIN
         RAISE EXCEPTION 'Voter is not an active member of the group';
     END IF;
 
-    -- Get group settings to determine approval rules
     SELECT g.settings, g.member_count, g.policy
     INTO v_settings, v_member_count, v_group_policy
     FROM groups g
-    WHERE g.id = v_group_id;
+    WHERE g.id = v_group_id
+      AND g.is_deleted = FALSE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Group not found or deleted';
+    END IF;
 
     v_approval_mode := COALESCE(v_settings->>'approvalMode', 'HYBRID');
     v_max_size := COALESCE((v_settings->>'memberApprovalMaxGroupSize')::INT, 20);

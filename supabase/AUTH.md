@@ -187,3 +187,40 @@ built-in SMTP) but less common for mobile apps in India.
 - No passwords stored — eliminates password leak risk
 - Session tokens managed by Supabase SDK (auto-refresh)
 - `auth_subject` stores the phone/email for reference, not for auth
+
+## Anonymity
+
+Posts and comments are **never** read from the base tables by clients.
+Instead, clients query `posts_feed` and `comments_feed` views which:
+
+- Omit `author_user_id` entirely (not sent to client)
+- Include `is_mine` boolean so the UI knows which posts are yours
+- Use `security_barrier` to prevent optimizer-based data leaks
+- Include membership checks via `fn_is_group_member()`
+
+```dart
+// Read posts — use the view, NOT the base table
+final posts = await supabase
+    .from('posts_feed')  // NOT 'posts'
+    .select()
+    .eq('group_id', groupId)
+    .order('created_at', ascending: false);
+
+// Each post has: id, group_id, author_alias, type, body, media_url,
+// duration_seconds, thumbnail_url, upvote_count, created_at,
+// updated_at, is_mine
+// It does NOT have: author_user_id
+
+// Write posts — use the base table (INSERT policy checks membership)
+await supabase.from('posts').insert({
+  'group_id': groupId,
+  'author_user_id': supabase.auth.currentUser!.id,
+  'author_alias': currentAlias,
+  'type': 'TEXT',
+  'body': bodyController.text,
+});
+```
+
+Direct `SELECT` on the `posts` and `comments` base tables is revoked from
+the `authenticated` role. Even if someone calls the REST API directly, they
+get a permission error.

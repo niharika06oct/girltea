@@ -1,11 +1,14 @@
 -- ============================================================
 -- GirlTea App — Row Level Security (RLS) Policies
 -- ============================================================
--- These policies use auth.uid() (the Supabase-authenticated user's
--- UUID) to control access. users.id = auth.uid() links the app
--- profile to the auth identity.
+-- All membership checks use fn_is_group_member() (SECURITY DEFINER)
+-- to avoid infinite recursion on group_memberships.
 --
--- Run this in the Supabase SQL Editor after creating all tables.
+-- Posts and comments are accessed ONLY through views (posts_feed,
+-- comments_feed) that omit author_user_id. Direct SELECT on base
+-- tables is revoked from authenticated.
+--
+-- Run auth_helpers.sql BEFORE this file.
 
 -- ============================================================
 -- Enable RLS on all tables
@@ -57,12 +60,7 @@ USING (
     is_deleted = FALSE
     AND (
         visibility = 'DISCOVERABLE'
-        OR EXISTS (
-            SELECT 1 FROM group_memberships gm
-            WHERE gm.group_id = id
-              AND gm.user_id = auth.uid()
-              AND gm.status = 'ACTIVE'
-        )
+        OR fn_is_group_member(id)
     )
 );
 
@@ -74,19 +72,26 @@ WITH CHECK (created_by_user_id = auth.uid());
 -- ============================================================
 -- GROUP MEMBERSHIPS
 -- ============================================================
+-- Uses fn_is_group_member() to avoid infinite recursion.
 
 CREATE POLICY "Members can see memberships in their groups"
 ON group_memberships FOR SELECT TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM group_memberships my_gm
-        WHERE my_gm.group_id = group_memberships.group_id
-          AND my_gm.user_id = auth.uid()
-          AND my_gm.status = 'ACTIVE'
+USING (fn_is_group_member(group_id));
+
+-- Direct INSERT is NOT allowed. Memberships are created only by
+-- fn_cast_join_vote (SECURITY DEFINER) when quorum is reached,
+-- or by the group creator adding themselves.
+
+CREATE POLICY "Creator can add themselves on group creation"
+ON group_memberships FOR INSERT TO authenticated
+WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (
+        SELECT 1 FROM groups g
+        WHERE g.id = group_memberships.group_id
+          AND g.created_by_user_id = auth.uid()
     )
 );
-
--- Insert handled by approval functions (service role)
 
 -- ============================================================
 -- GROUP INVITES
@@ -96,24 +101,12 @@ CREATE POLICY "Members can create invites for their groups"
 ON group_invites FOR INSERT TO authenticated
 WITH CHECK (
     created_by_user_id = auth.uid()
-    AND EXISTS (
-        SELECT 1 FROM group_memberships gm
-        WHERE gm.group_id = group_invites.group_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
-    )
+    AND fn_is_group_member(group_id)
 );
 
 CREATE POLICY "Members can read invites for their groups"
 ON group_invites FOR SELECT TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM group_memberships gm
-        WHERE gm.group_id = group_invites.group_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
-    )
-);
+USING (fn_is_group_member(group_id));
 
 -- ============================================================
 -- GROUP ENTRY QUESTIONS
@@ -155,12 +148,7 @@ CREATE POLICY "Requester and group members can see join requests"
 ON group_join_requests FOR SELECT TO authenticated
 USING (
     requester_user_id = auth.uid()
-    OR EXISTS (
-        SELECT 1 FROM group_memberships gm
-        WHERE gm.group_id = group_join_requests.group_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
-    )
+    OR fn_is_group_member(group_id)
 );
 
 -- ============================================================
@@ -185,12 +173,7 @@ USING (
         WHERE jr.id = group_join_request_answers.join_request_id
           AND (
             jr.requester_user_id = auth.uid()
-            OR EXISTS (
-                SELECT 1 FROM group_memberships gm
-                WHERE gm.group_id = jr.group_id
-                  AND gm.user_id = auth.uid()
-                  AND gm.status = 'ACTIVE'
-            )
+            OR fn_is_group_member(jr.group_id)
           )
     )
 );
@@ -198,8 +181,9 @@ USING (
 -- ============================================================
 -- GROUP JOIN VOTES
 -- ============================================================
--- INSERT via fn_cast_join_vote (SECURITY DEFINER) is the intended
--- path. This policy is a safety net if direct INSERT is attempted.
+-- Intended path: fn_cast_join_vote (SECURITY DEFINER).
+-- RLS is the safety net for direct INSERT attempts.
+-- Blocks: non-members, voter_id forgery, requester self-voting.
 
 CREATE POLICY "Members can cast join votes"
 ON group_join_votes FOR INSERT TO authenticated
@@ -207,10 +191,9 @@ WITH CHECK (
     voter_user_id = auth.uid()
     AND EXISTS (
         SELECT 1 FROM group_join_requests jr
-        JOIN group_memberships gm ON gm.group_id = jr.group_id
         WHERE jr.id = group_join_votes.join_request_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
+          AND jr.requester_user_id != auth.uid()
+          AND fn_is_group_member(jr.group_id)
     )
 );
 
@@ -219,10 +202,8 @@ ON group_join_votes FOR SELECT TO authenticated
 USING (
     EXISTS (
         SELECT 1 FROM group_join_requests jr
-        JOIN group_memberships gm ON gm.group_id = jr.group_id
         WHERE jr.id = group_join_votes.join_request_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
+          AND fn_is_group_member(jr.group_id)
     )
 );
 
@@ -234,31 +215,18 @@ CREATE POLICY "Members can create removal requests"
 ON group_removal_requests FOR INSERT TO authenticated
 WITH CHECK (
     requested_by_user_id = auth.uid()
-    AND EXISTS (
-        SELECT 1 FROM group_memberships gm
-        WHERE gm.group_id = group_removal_requests.group_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
-    )
+    AND fn_is_group_member(group_id)
 );
 
 CREATE POLICY "Members can see removal requests in their groups"
 ON group_removal_requests FOR SELECT TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM group_memberships gm
-        WHERE gm.group_id = group_removal_requests.group_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
-    )
-);
+USING (fn_is_group_member(group_id));
 
 -- ============================================================
 -- GROUP REMOVAL VOTES
 -- ============================================================
--- INSERT via fn_cast_removal_vote (SECURITY DEFINER) is the intended
--- path. This policy is a safety net if direct INSERT is attempted.
--- Blocks the removal target from voting on their own removal.
+-- Intended path: fn_cast_removal_vote (SECURITY DEFINER).
+-- RLS blocks: non-members, voter_id forgery, target self-voting.
 
 CREATE POLICY "Members can cast removal votes"
 ON group_removal_votes FOR INSERT TO authenticated
@@ -266,11 +234,9 @@ WITH CHECK (
     voter_user_id = auth.uid()
     AND EXISTS (
         SELECT 1 FROM group_removal_requests rr
-        JOIN group_memberships gm ON gm.group_id = rr.group_id
         WHERE rr.id = group_removal_votes.removal_request_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
           AND rr.target_user_id != auth.uid()
+          AND fn_is_group_member(rr.group_id)
     )
 );
 
@@ -279,39 +245,23 @@ ON group_removal_votes FOR SELECT TO authenticated
 USING (
     EXISTS (
         SELECT 1 FROM group_removal_requests rr
-        JOIN group_memberships gm ON gm.group_id = rr.group_id
         WHERE rr.id = group_removal_votes.removal_request_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
+          AND fn_is_group_member(rr.group_id)
     )
 );
 
 -- ============================================================
--- POSTS
+-- POSTS (base table)
 -- ============================================================
+-- SELECT on posts is revoked from authenticated (see below).
+-- Clients read through posts_feed view which omits author_user_id.
+-- INSERT/UPDATE/DELETE policies remain on the base table.
 
 CREATE POLICY "Members can create posts in their groups"
 ON posts FOR INSERT TO authenticated
 WITH CHECK (
     author_user_id = auth.uid()
-    AND EXISTS (
-        SELECT 1 FROM group_memberships gm
-        WHERE gm.group_id = posts.group_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
-    )
-);
-
-CREATE POLICY "Members can read posts in their groups"
-ON posts FOR SELECT TO authenticated
-USING (
-    is_deleted = FALSE
-    AND EXISTS (
-        SELECT 1 FROM group_memberships gm
-        WHERE gm.group_id = posts.group_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
-    )
+    AND fn_is_group_member(group_id)
 );
 
 CREATE POLICY "Authors can update their own posts"
@@ -319,9 +269,14 @@ ON posts FOR UPDATE TO authenticated
 USING (author_user_id = auth.uid())
 WITH CHECK (author_user_id = auth.uid());
 
+CREATE POLICY "Authors can soft-delete their own posts"
+ON posts FOR DELETE TO authenticated
+USING (author_user_id = auth.uid());
+
 -- ============================================================
--- COMMENTS
+-- COMMENTS (base table)
 -- ============================================================
+-- Same pattern: SELECT revoked, clients use comments_feed view.
 
 CREATE POLICY "Members can create comments on posts in their groups"
 ON comments FOR INSERT TO authenticated
@@ -329,23 +284,8 @@ WITH CHECK (
     author_user_id = auth.uid()
     AND EXISTS (
         SELECT 1 FROM posts p
-        JOIN group_memberships gm ON gm.group_id = p.group_id
         WHERE p.id = comments.post_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
-    )
-);
-
-CREATE POLICY "Members can read comments on posts in their groups"
-ON comments FOR SELECT TO authenticated
-USING (
-    is_deleted = FALSE
-    AND EXISTS (
-        SELECT 1 FROM posts p
-        JOIN group_memberships gm ON gm.group_id = p.group_id
-        WHERE p.id = comments.post_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
+          AND fn_is_group_member(p.group_id)
     )
 );
 
@@ -353,6 +293,10 @@ CREATE POLICY "Authors can update their own comments"
 ON comments FOR UPDATE TO authenticated
 USING (author_user_id = auth.uid())
 WITH CHECK (author_user_id = auth.uid());
+
+CREATE POLICY "Authors can soft-delete their own comments"
+ON comments FOR DELETE TO authenticated
+USING (author_user_id = auth.uid());
 
 -- ============================================================
 -- POST UPVOTES
@@ -364,10 +308,8 @@ WITH CHECK (
     user_id = auth.uid()
     AND EXISTS (
         SELECT 1 FROM posts p
-        JOIN group_memberships gm ON gm.group_id = p.group_id
         WHERE p.id = post_upvotes.post_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
+          AND fn_is_group_member(p.group_id)
     )
 );
 
@@ -376,10 +318,8 @@ ON post_upvotes FOR SELECT TO authenticated
 USING (
     EXISTS (
         SELECT 1 FROM posts p
-        JOIN group_memberships gm ON gm.group_id = p.group_id
         WHERE p.id = post_upvotes.post_id
-          AND gm.user_id = auth.uid()
-          AND gm.status = 'ACTIVE'
+          AND fn_is_group_member(p.group_id)
     )
 );
 
@@ -398,3 +338,64 @@ WITH CHECK (reporter_user_id = auth.uid());
 CREATE POLICY "Users can see their own reports"
 ON reports FOR SELECT TO authenticated
 USING (reporter_user_id = auth.uid());
+
+-- ============================================================
+-- ANONYMITY: Views + privilege revocation
+-- ============================================================
+-- Posts and comments are exposed ONLY through views that omit
+-- author_user_id. The views provide an is_mine boolean so the
+-- client knows which posts/comments belong to the current user
+-- (for edit/delete UI) without revealing the identity.
+--
+-- security_barrier prevents the optimizer from leaking data
+-- through predicate pushdown.
+
+CREATE OR REPLACE VIEW posts_feed WITH (security_barrier = true) AS
+SELECT
+    p.id,
+    p.group_id,
+    p.author_alias,
+    p.type,
+    p.body,
+    p.media_url,
+    p.duration_seconds,
+    p.thumbnail_url,
+    p.upvote_count,
+    p.created_at,
+    p.updated_at,
+    (p.author_user_id = auth.uid()) AS is_mine
+FROM posts p
+WHERE p.is_deleted = FALSE
+  AND fn_is_group_member(p.group_id);
+
+CREATE OR REPLACE VIEW comments_feed WITH (security_barrier = true) AS
+SELECT
+    c.id,
+    c.post_id,
+    c.author_alias,
+    c.type,
+    c.body,
+    c.media_url,
+    c.duration_seconds,
+    c.created_at,
+    c.updated_at,
+    (c.author_user_id = auth.uid()) AS is_mine
+FROM comments c
+WHERE c.is_deleted = FALSE
+  AND EXISTS (
+      SELECT 1 FROM posts p
+      WHERE p.id = c.post_id
+        AND fn_is_group_member(p.group_id)
+  );
+
+-- Revoke direct SELECT on base tables from client-facing roles.
+-- INSERT/UPDATE/DELETE still work through RLS policies above.
+-- SECURITY DEFINER functions (moderation, approval) can still read.
+
+REVOKE SELECT ON posts FROM authenticated;
+REVOKE SELECT ON posts FROM anon;
+REVOKE SELECT ON comments FROM authenticated;
+REVOKE SELECT ON comments FROM anon;
+
+GRANT SELECT ON posts_feed TO authenticated;
+GRANT SELECT ON comments_feed TO authenticated;

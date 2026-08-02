@@ -38,6 +38,27 @@ Comments on any post type support text, image, and voice:
 - No video comments — keeps the comment thread lightweight
 - Single-level nesting (no replies to replies)
 
+### Anonymity Enforcement
+
+`author_user_id` exists in the `posts` and `comments` base tables for internal
+use (moderation, "delete my post," cascading account deletion). But clients
+**never** see it.
+
+**How it works:**
+- Direct `SELECT` on `posts` and `comments` is revoked from `authenticated`
+- Clients read through `posts_feed` and `comments_feed` views
+- Views omit `author_user_id` and provide `is_mine` boolean instead
+- Views use `security_barrier` to prevent optimizer-based data leaks
+- Views include `fn_is_group_member()` checks so membership is enforced
+
+**What the client sees per post:**
+`id`, `group_id`, `author_alias`, `type`, `body`, `media_url`,
+`duration_seconds`, `thumbnail_url`, `upvote_count`, `created_at`,
+`updated_at`, `is_mine`
+
+**What the client does NOT see:**
+`author_user_id`, `deleted_at`, `is_deleted` (filtered in view)
+
 ### Upvotes (tea drops)
 
 `post_upvotes` tracks who upvoted which post via a composite PK `(post_id, user_id)`.

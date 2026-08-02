@@ -29,6 +29,10 @@ DECLARE
     v_democratic_threshold INT;
     v_current_approvals INT;
 BEGIN
+    IF p_voter_user_id IS NULL THEN
+        RAISE EXCEPTION 'Not authenticated';
+    END IF;
+
     SELECT rr.group_id, rr.target_user_id, rr.requested_by_user_id, rr.status
     INTO v_group_id, v_target_user_id, v_requested_by, v_request_status
     FROM group_removal_requests rr
@@ -60,7 +64,12 @@ BEGIN
     SELECT g.settings, g.member_count
     INTO v_settings, v_member_count
     FROM groups g
-    WHERE g.id = v_group_id;
+    WHERE g.id = v_group_id
+      AND g.is_deleted = FALSE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Group not found or deleted';
+    END IF;
 
     v_democratic_threshold := COALESCE((v_settings->>'democraticThreshold')::INT, 10);
     v_quorum := COALESCE((v_settings->>'removalQuorum')::INT, 2);
@@ -117,8 +126,19 @@ DECLARE
     v_settings JSONB;
     v_ttl_hours INT;
 BEGIN
+    IF p_requested_by_user_id IS NULL THEN
+        RAISE EXCEPTION 'Not authenticated';
+    END IF;
+
     IF p_requested_by_user_id = p_target_user_id THEN
         RAISE EXCEPTION 'Cannot request removal of yourself';
+    END IF;
+
+    PERFORM 1 FROM groups
+    WHERE id = p_group_id AND is_deleted = FALSE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Group not found or deleted';
     END IF;
 
     SELECT gm.role INTO v_requester_role
