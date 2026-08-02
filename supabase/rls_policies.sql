@@ -347,8 +347,21 @@ USING (reporter_user_id = auth.uid());
 -- client knows which posts/comments belong to the current user
 -- (for edit/delete UI) without revealing the identity.
 --
--- security_barrier prevents the optimizer from leaking data
--- through predicate pushdown.
+-- WHY NOT security_invoker = true:
+--   We REVOKE SELECT on the base tables from authenticated.
+--   security_invoker makes the view run AS the calling user —
+--   who has no SELECT privilege — so it would return nothing.
+--
+-- Instead, the view runs as its owner (who CAN read the base
+-- table), and access control is enforced by:
+--   1. fn_is_group_member() in the WHERE clause (membership gate)
+--   2. security_barrier (prevents optimizer predicate pushdown leaks)
+--   3. auth.uid() for is_mine (session context, not role context)
+--
+-- fn_is_group_member() is SECURITY DEFINER and reads auth.uid()
+-- from the session, which is preserved even when the view runs
+-- as its owner. This is the standard Supabase pattern for
+-- views that need to hide columns while enforcing access.
 
 CREATE OR REPLACE VIEW posts_feed WITH (security_barrier = true) AS
 SELECT

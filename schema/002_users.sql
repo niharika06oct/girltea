@@ -23,7 +23,6 @@ CREATE TABLE users (
     locale          TEXT NOT NULL DEFAULT 'en-IN',
     country_code    TEXT NOT NULL DEFAULT 'IN',
 
-    in_app_alias    TEXT,
     karma           INT NOT NULL DEFAULT 0,
 
     is_deleted      BOOLEAN NOT NULL DEFAULT FALSE,

@@ -110,8 +110,8 @@ BEGIN
         SET status = 'APPROVED', resolved_at = now()
         WHERE id = p_join_request_id;
 
-        INSERT INTO group_memberships (group_id, user_id, role, status)
-        VALUES (v_group_id, v_requester_id, 'MEMBER', 'ACTIVE')
+        INSERT INTO group_memberships (group_id, user_id, role, status, alias)
+        VALUES (v_group_id, v_requester_id, 'MEMBER', 'ACTIVE', fn_generate_alias())
         ON CONFLICT (group_id, user_id) DO UPDATE
             SET status = 'ACTIVE', joined_at = now(), updated_at = now();
 

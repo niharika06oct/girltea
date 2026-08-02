@@ -38,6 +38,27 @@ Comments on any post type support text, image, and voice:
 - No video comments — keeps the comment thread lightweight
 - Single-level nesting (no replies to replies)
 
+### Alias Strategy
+
+Aliases are **stable per group, different across groups**:
+
+| Property | Value |
+|---|---|
+| Where alias lives | `group_memberships.alias` |
+| Generated | On join (by `fn_generate_alias()`) |
+| Stability | Same alias for all your posts/comments in that group |
+| Cross-group | Different alias in each group |
+| On posts/comments | Snapshotted at write time from membership alias |
+| If alias regenerated | Old posts keep the old alias (thread continuity) |
+| Format | `{Adjective}{Noun}{00-99}` e.g. "StormyMuse27", "VelvetPhoenix04" |
+
+**Why not per-user global alias:** In a 6-person work group, a stable global
+alias is identified by writing style within a week. Per-group aliases mean your
+school group persona is disconnected from your work group persona.
+
+**Why not per-post rotating:** Threading breaks — you can't follow a conversation
+if the author changes every post. Per-group stability preserves context.
+
 ### Anonymity Enforcement
 
 `author_user_id` exists in the `posts` and `comments` base tables for internal
