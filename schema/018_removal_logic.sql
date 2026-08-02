@@ -113,25 +113,25 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- APPROVE vote so only 1 more person is needed for quorum of 2)
 -- ============================================================
 
+-- Accepts target by ALIAS within the group (since user_id is not
+-- visible to clients via group_members_view). Resolves alias to
+-- user_id server-side.
 CREATE OR REPLACE FUNCTION fn_raise_removal_request(
     p_group_id UUID,
-    p_target_user_id UUID,
+    p_target_alias TEXT,
     p_reason TEXT DEFAULT NULL
 )
 RETURNS UUID AS $$
 DECLARE
-    p_requested_by_user_id UUID := auth.uid();
+    v_caller UUID := auth.uid();
+    v_target_user_id UUID;
     v_request_id UUID;
     v_requester_role membership_role;
     v_settings JSONB;
     v_ttl_hours INT;
 BEGIN
-    IF p_requested_by_user_id IS NULL THEN
+    IF v_caller IS NULL THEN
         RAISE EXCEPTION 'Not authenticated';
-    END IF;
-
-    IF p_requested_by_user_id = p_target_user_id THEN
-        RAISE EXCEPTION 'Cannot request removal of yourself';
     END IF;
 
     PERFORM 1 FROM groups
@@ -144,20 +144,25 @@ BEGIN
     SELECT gm.role INTO v_requester_role
     FROM group_memberships gm
     WHERE gm.group_id = p_group_id
-      AND gm.user_id = p_requested_by_user_id
+      AND gm.user_id = v_caller
       AND gm.status = 'ACTIVE';
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Requester is not an active member of the group';
     END IF;
 
-    PERFORM 1 FROM group_memberships
-    WHERE group_id = p_group_id
-      AND user_id = p_target_user_id
-      AND status = 'ACTIVE';
+    SELECT gm.user_id INTO v_target_user_id
+    FROM group_memberships gm
+    WHERE gm.group_id = p_group_id
+      AND gm.alias = p_target_alias
+      AND gm.status = 'ACTIVE';
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Target is not an active member of the group';
+        RAISE EXCEPTION 'No active member with that alias in this group';
+    END IF;
+
+    IF v_caller = v_target_user_id THEN
+        RAISE EXCEPTION 'Cannot request removal of yourself';
     END IF;
 
     SELECT g.settings INTO v_settings
@@ -168,13 +173,13 @@ BEGIN
     INSERT INTO group_removal_requests (
         group_id, target_user_id, requested_by_user_id, reason, expires_at
     ) VALUES (
-        p_group_id, p_target_user_id, p_requested_by_user_id, p_reason,
+        p_group_id, v_target_user_id, v_caller, p_reason,
         now() + (v_ttl_hours || ' hours')::INTERVAL
     )
     RETURNING id INTO v_request_id;
 
     INSERT INTO group_removal_votes (removal_request_id, voter_user_id, vote, voter_role)
-    VALUES (v_request_id, p_requested_by_user_id, 'APPROVE', v_requester_role);
+    VALUES (v_request_id, v_caller, 'APPROVE', v_requester_role);
 
     RETURN v_request_id;
 END;

@@ -32,9 +32,32 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 
 -- ============================================================
+-- fn_post_group: resolve group_id from a post_id
+-- ============================================================
+-- CRITICAL: RLS policies on comments and post_upvotes need to
+-- check membership in the post's group. But SELECT on posts is
+-- revoked from authenticated. Without this DEFINER helper,
+-- every comment insert and upvote insert throws
+-- "permission denied for table posts".
+
+CREATE OR REPLACE FUNCTION fn_post_group(p_post_id UUID)
+RETURNS UUID AS $$
+DECLARE
+    v_group_id UUID;
+BEGIN
+    SELECT group_id INTO v_group_id
+    FROM posts
+    WHERE id = p_post_id
+      AND is_deleted = FALSE;
+
+    RETURN v_group_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+
+-- ============================================================
 -- fn_is_post_author: check if caller owns a post
 -- ============================================================
--- Used by views to compute is_mine without exposing author_user_id.
 
 CREATE OR REPLACE FUNCTION fn_is_post_author(p_post_id UUID)
 RETURNS BOOLEAN AS $$
@@ -67,6 +90,31 @@ BEGIN
         SELECT 1 FROM comments
         WHERE id = p_comment_id
           AND author_user_id = auth.uid()
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+
+-- ============================================================
+-- fn_is_group_owner: check if caller has OWNER role
+-- ============================================================
+-- Used by group update and entry question policies instead of
+-- created_by_user_id (which never changes, contradicting the
+-- democratic model).
+
+CREATE OR REPLACE FUNCTION fn_is_group_owner(p_group_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    RETURN EXISTS (
+        SELECT 1 FROM group_memberships
+        WHERE group_id = p_group_id
+          AND user_id = auth.uid()
+          AND role = 'OWNER'
+          AND status = 'ACTIVE'
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
