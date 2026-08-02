@@ -5,6 +5,8 @@
 -- All derive caller from auth.uid().
 -- Requires: pgcrypto extension (for digest()).
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
 -- ============================================================
 -- fn_create_group_with_owner
 -- ============================================================

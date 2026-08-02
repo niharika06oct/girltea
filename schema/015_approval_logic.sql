@@ -3,6 +3,10 @@
 -- ============================================================
 -- Atomically: vote → check quorum → admit or reject.
 -- SECURITY DEFINER: bypasses RLS, re-checks everything internally.
+--
+-- RAISE EXCEPTION rolls back the entire transaction including
+-- any preceding UPDATEs. All rejection paths use RETURN instead,
+-- so the status change commits.
 
 CREATE OR REPLACE FUNCTION fn_cast_join_vote(
     p_join_request_id UUID,
@@ -29,6 +33,7 @@ DECLARE
     v_current_approvals INT;
     v_current_rejections INT;
     v_invite_rows INT;
+    v_membership_rows INT;
 BEGIN
     IF p_voter_user_id IS NULL THEN
         RAISE EXCEPTION 'Not authenticated';
@@ -102,7 +107,7 @@ BEGIN
     WHERE jv.join_request_id = p_join_request_id
       AND jv.vote = 'REJECT';
 
-    -- FIX #3: Rejection quorum — same threshold as approval.
+    -- Rejection quorum — same threshold as approval.
     IF p_vote = 'REJECT' AND v_current_rejections >= v_quorum THEN
         UPDATE group_join_requests
         SET status = 'REJECTED', resolved_at = now()
@@ -116,16 +121,22 @@ BEGIN
     END IF;
 
     IF p_vote = 'APPROVE' AND v_current_approvals >= v_quorum THEN
-        -- FIX #1: Re-check gender eligibility at admission time.
+        -- Re-check gender eligibility at admission time.
+        -- Returns FALSE (not RAISE) for missing/ineligible user so
+        -- the REJECTED status update commits.
         IF NOT fn_validate_join_eligibility(v_requester_id, v_group_id) THEN
             UPDATE group_join_requests
             SET status = 'REJECTED', resolved_at = now()
             WHERE id = p_join_request_id;
 
-            RAISE EXCEPTION 'Requester no longer meets gender policy for this group';
+            RETURN QUERY SELECT 'REJECTED'::join_request_status,
+                                v_current_approvals,
+                                v_current_rejections,
+                                v_quorum;
+            RETURN;
         END IF;
 
-        -- FIX #2: Block BANNED users. ON CONFLICT only reactivates LEFT.
+        -- Block BANNED users. Return REJECTED (not RAISE) so it commits.
         PERFORM 1 FROM group_memberships
         WHERE group_id = v_group_id
           AND user_id = v_requester_id
@@ -136,7 +147,11 @@ BEGIN
             SET status = 'REJECTED', resolved_at = now()
             WHERE id = p_join_request_id;
 
-            RAISE EXCEPTION 'User is banned from this group';
+            RETURN QUERY SELECT 'REJECTED'::join_request_status,
+                                v_current_approvals,
+                                v_current_rejections,
+                                v_quorum;
+            RETURN;
         END IF;
 
         UPDATE group_join_requests
@@ -149,7 +164,21 @@ BEGIN
             SET status = 'ACTIVE', joined_at = now(), updated_at = now()
             WHERE group_memberships.status = 'LEFT';
 
-        -- FIX #5: Enforce max_uses at admission. Raise if exhausted.
+        -- Check if membership was actually created/updated
+        GET DIAGNOSTICS v_membership_rows = ROW_COUNT;
+        IF v_membership_rows = 0 THEN
+            UPDATE group_join_requests
+            SET status = 'REJECTED', resolved_at = now()
+            WHERE id = p_join_request_id;
+
+            RETURN QUERY SELECT 'REJECTED'::join_request_status,
+                                v_current_approvals,
+                                v_current_rejections,
+                                v_quorum;
+            RETURN;
+        END IF;
+
+        -- Increment invite use_count on admission (race-safe).
         IF EXISTS (
             SELECT 1 FROM group_join_requests
             WHERE id = p_join_request_id AND invite_id IS NOT NULL
@@ -185,6 +214,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- ============================================================
 -- Policy validation: check gender eligibility
 -- ============================================================
+-- Returns FALSE for missing/deleted users (not RAISE) so callers
+-- can use the result without aborting their transaction.
 
 CREATE OR REPLACE FUNCTION fn_validate_join_eligibility(
     p_user_id UUID,
@@ -199,14 +230,14 @@ BEGIN
     FROM groups g WHERE g.id = p_group_id AND g.is_deleted = FALSE;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Group not found or deleted';
+        RETURN FALSE;
     END IF;
 
     SELECT u.gender INTO v_user_gender
     FROM users u WHERE u.id = p_user_id AND u.is_deleted = FALSE;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'User not found or deleted';
+        RETURN FALSE;
     END IF;
 
     CASE v_policy

@@ -94,8 +94,13 @@ BEGIN
     WHERE rv.removal_request_id = p_removal_request_id
       AND rv.vote = 'REJECT';
 
-    -- FIX #3: Rejection quorum
-    IF p_vote = 'REJECT' AND v_current_rejections >= v_quorum THEN
+    -- Rejection quorum for removals: below democraticThreshold,
+    -- ONE reject kills the removal. Removing someone should be hard,
+    -- keeping them should be easy. Above threshold, same quorum applies.
+    IF p_vote = 'REJECT' AND (
+        (v_member_count < v_democratic_threshold AND v_current_rejections >= 1)
+        OR (v_member_count >= v_democratic_threshold AND v_current_rejections >= v_quorum)
+    ) THEN
         UPDATE group_removal_requests
         SET status = 'REJECTED', resolved_at = now()
         WHERE id = p_removal_request_id;
