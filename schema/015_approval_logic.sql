@@ -11,7 +11,6 @@
 
 CREATE OR REPLACE FUNCTION fn_cast_join_vote(
     p_join_request_id UUID,
-    p_voter_user_id UUID,
     p_vote vote_decision
 )
 RETURNS TABLE (
@@ -20,6 +19,7 @@ RETURNS TABLE (
     quorum_required INT
 ) AS $$
 DECLARE
+    p_voter_user_id UUID := auth.uid();
     v_group_id UUID;
     v_requester_id UUID;
     v_request_status join_request_status;
@@ -118,7 +118,7 @@ BEGIN
                             v_quorum;
     END IF;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 
 -- ============================================================
@@ -164,4 +164,4 @@ BEGIN
 
     RETURN TRUE;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;

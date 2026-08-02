@@ -9,7 +9,6 @@
 
 CREATE OR REPLACE FUNCTION fn_cast_removal_vote(
     p_removal_request_id UUID,
-    p_voter_user_id UUID,
     p_vote vote_decision
 )
 RETURNS TABLE (
@@ -18,6 +17,7 @@ RETURNS TABLE (
     quorum_required INT
 ) AS $$
 DECLARE
+    p_voter_user_id UUID := auth.uid();
     v_group_id UUID;
     v_target_user_id UUID;
     v_requested_by UUID;
@@ -96,7 +96,7 @@ BEGIN
                             v_quorum;
     END IF;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 
 -- ============================================================
@@ -106,12 +106,12 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION fn_raise_removal_request(
     p_group_id UUID,
-    p_requested_by_user_id UUID,
     p_target_user_id UUID,
     p_reason TEXT DEFAULT NULL
 )
 RETURNS UUID AS $$
 DECLARE
+    p_requested_by_user_id UUID := auth.uid();
     v_request_id UUID;
     v_requester_role membership_role;
     v_settings JSONB;
@@ -158,4 +158,4 @@ BEGIN
 
     RETURN v_request_id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;

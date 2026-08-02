@@ -198,10 +198,21 @@ USING (
 -- ============================================================
 -- GROUP JOIN VOTES
 -- ============================================================
+-- INSERT via fn_cast_join_vote (SECURITY DEFINER) is the intended
+-- path. This policy is a safety net if direct INSERT is attempted.
 
 CREATE POLICY "Members can cast join votes"
 ON group_join_votes FOR INSERT TO authenticated
-WITH CHECK (voter_user_id = auth.uid());
+WITH CHECK (
+    voter_user_id = auth.uid()
+    AND EXISTS (
+        SELECT 1 FROM group_join_requests jr
+        JOIN group_memberships gm ON gm.group_id = jr.group_id
+        WHERE jr.id = group_join_votes.join_request_id
+          AND gm.user_id = auth.uid()
+          AND gm.status = 'ACTIVE'
+    )
+);
 
 CREATE POLICY "Members can see join votes in their groups"
 ON group_join_votes FOR SELECT TO authenticated
@@ -221,7 +232,15 @@ USING (
 
 CREATE POLICY "Members can create removal requests"
 ON group_removal_requests FOR INSERT TO authenticated
-WITH CHECK (requested_by_user_id = auth.uid());
+WITH CHECK (
+    requested_by_user_id = auth.uid()
+    AND EXISTS (
+        SELECT 1 FROM group_memberships gm
+        WHERE gm.group_id = group_removal_requests.group_id
+          AND gm.user_id = auth.uid()
+          AND gm.status = 'ACTIVE'
+    )
+);
 
 CREATE POLICY "Members can see removal requests in their groups"
 ON group_removal_requests FOR SELECT TO authenticated
@@ -237,10 +256,23 @@ USING (
 -- ============================================================
 -- GROUP REMOVAL VOTES
 -- ============================================================
+-- INSERT via fn_cast_removal_vote (SECURITY DEFINER) is the intended
+-- path. This policy is a safety net if direct INSERT is attempted.
+-- Blocks the removal target from voting on their own removal.
 
 CREATE POLICY "Members can cast removal votes"
 ON group_removal_votes FOR INSERT TO authenticated
-WITH CHECK (voter_user_id = auth.uid());
+WITH CHECK (
+    voter_user_id = auth.uid()
+    AND EXISTS (
+        SELECT 1 FROM group_removal_requests rr
+        JOIN group_memberships gm ON gm.group_id = rr.group_id
+        WHERE rr.id = group_removal_votes.removal_request_id
+          AND gm.user_id = auth.uid()
+          AND gm.status = 'ACTIVE'
+          AND rr.target_user_id != auth.uid()
+    )
+);
 
 CREATE POLICY "Members can see removal votes"
 ON group_removal_votes FOR SELECT TO authenticated
