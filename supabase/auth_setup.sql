@@ -33,7 +33,7 @@ BEGIN
           AND is_deleted = FALSE
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
 
 -- ============================================================
 -- Helper function: get current user's profile
@@ -47,4 +47,7 @@ BEGIN
     WHERE id = auth.uid()
       AND is_deleted = FALSE;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
+
+REVOKE EXECUTE ON FUNCTION fn_has_profile() FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_my_profile() FROM anon;

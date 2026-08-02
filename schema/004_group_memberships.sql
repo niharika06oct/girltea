@@ -14,5 +14,7 @@ CREATE TABLE group_memberships (
     joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    PRIMARY KEY (group_id, user_id)
+    PRIMARY KEY (group_id, user_id),
+
+    CONSTRAINT uq_alias_per_group UNIQUE (group_id, alias)
 );

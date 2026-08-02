@@ -105,15 +105,24 @@ BEGIN
       AND jv.vote = 'APPROVE';
 
     IF p_vote = 'APPROVE' AND v_current_approvals >= v_quorum THEN
-        -- Admit the requester
         UPDATE group_join_requests
         SET status = 'APPROVED', resolved_at = now()
         WHERE id = p_join_request_id;
 
         INSERT INTO group_memberships (group_id, user_id, role, status, alias)
-        VALUES (v_group_id, v_requester_id, 'MEMBER', 'ACTIVE', fn_generate_alias())
+        VALUES (v_group_id, v_requester_id, 'MEMBER', 'ACTIVE', fn_generate_alias_for_group(v_group_id))
         ON CONFLICT (group_id, user_id) DO UPDATE
             SET status = 'ACTIVE', joined_at = now(), updated_at = now();
+
+        -- FIX #5: Increment invite use_count on admission (not at request time).
+        -- Race-safe: UPDATE ... WHERE use_count < max_uses.
+        UPDATE group_invites
+        SET use_count = use_count + 1
+        WHERE id = (
+            SELECT invite_id FROM group_join_requests
+            WHERE id = p_join_request_id AND invite_id IS NOT NULL
+        )
+        AND (max_uses IS NULL OR use_count < max_uses);
 
         RETURN QUERY SELECT 'APPROVED'::join_request_status,
                             v_current_approvals,
@@ -170,4 +179,11 @@ BEGIN
 
     RETURN TRUE;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
+
+-- ============================================================
+-- REVOKE from anon
+-- ============================================================
+
+REVOKE EXECUTE ON FUNCTION fn_cast_join_vote(UUID, vote_decision) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_validate_join_eligibility(UUID, UUID) FROM anon;

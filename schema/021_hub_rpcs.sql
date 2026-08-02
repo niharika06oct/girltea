@@ -1,14 +1,16 @@
 -- ============================================================
 -- GirlTea App — Hub RPCs
 -- ============================================================
--- Four functions the hub screen depends on. All SECURITY DEFINER
--- with locked search_path. All derive caller from auth.uid().
+-- All SECURITY DEFINER with locked search_path.
+-- All derive caller from auth.uid().
+-- Requires: pgcrypto extension (for digest()).
 
 -- ============================================================
 -- fn_create_group_with_owner
 -- ============================================================
--- Atomically: create group + insert owner membership with alias.
--- Returns the new group's UUID.
+-- FIX #1: Validates caller's gender against the group policy
+-- BEFORE creating the group. A man cannot create a WOMEN_ONLY
+-- room even via raw RPC call.
 
 CREATE OR REPLACE FUNCTION fn_create_group_with_owner(
     p_name TEXT,
@@ -21,24 +23,39 @@ RETURNS UUID AS $$
 DECLARE
     v_caller UUID := auth.uid();
     v_group_id UUID;
+    v_user_gender gender;
 BEGIN
     IF v_caller IS NULL THEN
         RAISE EXCEPTION 'Not authenticated';
     END IF;
 
-    PERFORM 1 FROM users
-    WHERE id = v_caller AND is_deleted = FALSE;
+    SELECT u.gender INTO v_user_gender
+    FROM users u
+    WHERE u.id = v_caller AND u.is_deleted = FALSE;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Profile not found — complete onboarding first';
     END IF;
+
+    CASE p_policy
+        WHEN 'WOMEN_ONLY' THEN
+            IF v_user_gender IS NULL OR v_user_gender != 'WOMAN' THEN
+                RAISE EXCEPTION 'Only women can create a WOMEN_ONLY group';
+            END IF;
+        WHEN 'MIXED' THEN
+            IF v_user_gender IS NULL THEN
+                RAISE EXCEPTION 'Gender must be set to create a MIXED group';
+            END IF;
+        WHEN 'GENDER_NEUTRAL' THEN
+            NULL;
+    END CASE;
 
     INSERT INTO groups (name, description, policy, visibility, category_tags, created_by_user_id)
     VALUES (p_name, p_description, p_policy, p_visibility, p_category_tags, v_caller)
     RETURNING id INTO v_group_id;
 
     INSERT INTO group_memberships (group_id, user_id, role, status, alias)
-    VALUES (v_group_id, v_caller, 'OWNER', 'ACTIVE', fn_generate_alias());
+    VALUES (v_group_id, v_caller, 'OWNER', 'ACTIVE', fn_generate_alias_for_group(v_group_id));
 
     RETURN v_group_id;
 END;
@@ -48,17 +65,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- ============================================================
 -- fn_resolve_invite
 -- ============================================================
--- Accepts a raw token (NOT a hash). Hashes it internally and
--- looks up the invite. Returns only safe metadata: group name,
--- description, policy, member count, entry questions. Never
--- the member list, never posts.
---
--- Also tells the caller whether they're already a member or
--- have a pending request (so the UI can skip the join form).
---
--- Rate-limit note: Supabase Edge Function or API gateway should
--- throttle calls to this by auth.uid() (e.g. 10/min) to prevent
--- brute-forcing tokens into a group-name oracle.
+-- Accepts raw token, hashes internally, returns ONLY safe metadata.
+-- Never returns member list or posts.
 
 CREATE OR REPLACE FUNCTION fn_resolve_invite(p_token TEXT)
 RETURNS TABLE (
@@ -138,11 +146,13 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions;
 -- ============================================================
 -- fn_submit_join_request
 -- ============================================================
--- Atomically creates a join request AND its answer rows.
--- Without this, a member could see a request with no answers
--- (blank form to vote on).
+-- FIX #2: Validates that every required entry question for the
+-- group has a non-blank answer, and that every submitted
+-- question_id belongs to p_group_id.
 --
--- p_answers: JSONB array of { question_id, question_version, answer_text }
+-- FIX #5: Does NOT increment invite use_count here. use_count
+-- is incremented in fn_cast_join_vote on admission, so a
+-- rejected/expired request doesn't burn the invite.
 
 CREATE OR REPLACE FUNCTION fn_submit_join_request(
     p_group_id UUID,
@@ -157,6 +167,9 @@ DECLARE
     v_invite_id UUID;
     v_token_hash TEXT;
     v_answer JSONB;
+    v_required_question RECORD;
+    v_submitted_qid UUID;
+    v_submitted_group UUID;
 BEGIN
     IF v_caller IS NULL THEN
         RAISE EXCEPTION 'Not authenticated';
@@ -191,6 +204,39 @@ BEGIN
         RAISE EXCEPTION 'Already have a pending request for this group';
     END IF;
 
+    -- Validate every submitted question_id belongs to this group
+    FOR v_answer IN SELECT * FROM jsonb_array_elements(p_answers)
+    LOOP
+        v_submitted_qid := (v_answer->>'question_id')::UUID;
+
+        SELECT eq.group_id INTO v_submitted_group
+        FROM group_entry_questions eq
+        WHERE eq.id = v_submitted_qid;
+
+        IF NOT FOUND OR v_submitted_group != p_group_id THEN
+            RAISE EXCEPTION 'Question % does not belong to this group', v_submitted_qid;
+        END IF;
+
+        IF COALESCE(TRIM(v_answer->>'answer_text'), '') = '' THEN
+            RAISE EXCEPTION 'Answer for question % is blank', v_submitted_qid;
+        END IF;
+    END LOOP;
+
+    -- Validate every required question has an answer
+    FOR v_required_question IN
+        SELECT eq.id FROM group_entry_questions eq
+        WHERE eq.group_id = p_group_id AND eq.is_required = TRUE
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements(p_answers) a
+            WHERE (a->>'question_id')::UUID = v_required_question.id
+              AND COALESCE(TRIM(a->>'answer_text'), '') != ''
+        ) THEN
+            RAISE EXCEPTION 'Required question % is not answered', v_required_question.id;
+        END IF;
+    END LOOP;
+
+    -- Validate invite token if provided (but don't consume use_count yet)
     IF p_token IS NOT NULL THEN
         v_token_hash := encode(digest(p_token, 'sha256'), 'hex');
 
@@ -205,9 +251,6 @@ BEGIN
         IF NOT FOUND THEN
             RAISE EXCEPTION 'Invite link is invalid, expired, or revoked';
         END IF;
-
-        UPDATE group_invites SET use_count = use_count + 1
-        WHERE id = v_invite_id;
     END IF;
 
     INSERT INTO group_join_requests (
@@ -239,12 +282,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions;
 -- ============================================================
 -- fn_pending_join_requests_for_me
 -- ============================================================
--- Returns pending join requests across all groups where the
--- caller is an ACTIVE member. Pre-aggregates approval count,
--- quorum, and whether the caller has already voted.
---
--- SECURITY DEFINER: must filter to caller's groups explicitly —
--- RLS is bypassed.
+-- FIX #6: Adds i_can_vote based on approvalMode. For ADMINS_ONLY
+-- groups above democraticThreshold, regular members see the
+-- request but can't vote.
 
 CREATE OR REPLACE FUNCTION fn_pending_join_requests_for_me()
 RETURNS TABLE (
@@ -256,6 +296,7 @@ RETURNS TABLE (
     approval_count BIGINT,
     quorum INT,
     i_have_voted BOOLEAN,
+    i_can_vote BOOLEAN,
     answers JSONB
 ) AS $$
 DECLARE
@@ -289,6 +330,31 @@ BEGIN
               AND jv.voter_user_id = v_caller
         ),
 
+        CASE
+            WHEN g.member_count < COALESCE((g.settings->>'democraticThreshold')::INT, 10)
+            THEN TRUE
+            WHEN COALESCE(g.settings->>'approvalMode', 'HYBRID') = 'MEMBERS_QUORUM'
+            THEN TRUE
+            WHEN COALESCE(g.settings->>'approvalMode', 'HYBRID') = 'ADMINS_ONLY'
+            THEN EXISTS (
+                SELECT 1 FROM group_memberships gm2
+                WHERE gm2.group_id = jr.group_id
+                  AND gm2.user_id = v_caller
+                  AND gm2.status = 'ACTIVE'
+                  AND gm2.role IN ('OWNER', 'ADMIN')
+            )
+            WHEN COALESCE(g.settings->>'approvalMode', 'HYBRID') = 'HYBRID'
+                 AND g.member_count >= COALESCE((g.settings->>'memberApprovalMaxGroupSize')::INT, 20)
+            THEN EXISTS (
+                SELECT 1 FROM group_memberships gm2
+                WHERE gm2.group_id = jr.group_id
+                  AND gm2.user_id = v_caller
+                  AND gm2.status = 'ACTIVE'
+                  AND gm2.role IN ('OWNER', 'ADMIN')
+            )
+            ELSE TRUE
+        END,
+
         COALESCE(
             (SELECT jsonb_agg(jsonb_build_object(
                 'question_id', a.question_id,
@@ -314,3 +380,13 @@ BEGIN
     ORDER BY jr.created_at;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+
+-- ============================================================
+-- REVOKE EXECUTE from anon on all RPCs
+-- ============================================================
+
+REVOKE EXECUTE ON FUNCTION fn_create_group_with_owner(TEXT, TEXT, group_policy, group_visibility, TEXT[]) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_resolve_invite(TEXT) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_submit_join_request(UUID, TEXT, join_request_source, JSONB) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_pending_join_requests_for_me() FROM anon;

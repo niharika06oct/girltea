@@ -10,8 +10,11 @@
 -- group_memberships.alias — so if a member's alias is later
 -- regenerated, their old posts keep the old alias (thread
 -- continuity is preserved).
+--
+-- UNIQUE(group_id, alias) on group_memberships prevents
+-- collisions. This function retries on conflict.
 
-CREATE OR REPLACE FUNCTION fn_generate_alias()
+CREATE OR REPLACE FUNCTION fn_generate_alias_for_group(p_group_id UUID)
 RETURNS TEXT AS $$
 DECLARE
     adjectives TEXT[] := ARRAY[
@@ -26,9 +29,25 @@ DECLARE
         'Flame', 'Fern', 'Star', 'Storm', 'Pearl',
         'Fox', 'Dove', 'Lotus', 'Comet', 'Ember'
     ];
+    v_alias TEXT;
+    v_attempts INT := 0;
 BEGIN
-    RETURN adjectives[1 + floor(random() * array_length(adjectives, 1))::INT]
-        || nouns[1 + floor(random() * array_length(nouns, 1))::INT]
-        || lpad(floor(random() * 100)::TEXT, 2, '0');
+    LOOP
+        v_alias := adjectives[1 + floor(random() * array_length(adjectives, 1))::INT]
+            || nouns[1 + floor(random() * array_length(nouns, 1))::INT]
+            || lpad(floor(random() * 100)::TEXT, 2, '0');
+
+        IF NOT EXISTS (
+            SELECT 1 FROM group_memberships
+            WHERE group_id = p_group_id AND alias = v_alias
+        ) THEN
+            RETURN v_alias;
+        END IF;
+
+        v_attempts := v_attempts + 1;
+        IF v_attempts > 50 THEN
+            RAISE EXCEPTION 'Could not generate unique alias after 50 attempts (group: %)', p_group_id;
+        END IF;
+    END LOOP;
 END;
 $$ LANGUAGE plpgsql;

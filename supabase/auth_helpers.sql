@@ -5,14 +5,13 @@
 -- recursion when RLS policies on group_memberships need to
 -- check group_memberships. Called from RLS policies and views.
 --
--- All functions lock search_path to prevent escalation.
+-- All functions: SECURITY DEFINER, locked search_path, STABLE.
+-- STABLE lets Postgres cache the result per-statement so a
+-- 500-row feed doesn't run 500 separate membership checks.
 
 -- ============================================================
 -- fn_is_group_member: core membership check
 -- ============================================================
--- Returns TRUE if auth.uid() is an ACTIVE member of the given group.
--- Used by nearly every RLS policy. SECURITY DEFINER so it reads
--- group_memberships without triggering RLS on that table.
 
 CREATE OR REPLACE FUNCTION fn_is_group_member(p_group_id UUID)
 RETURNS BOOLEAN AS $$
@@ -28,16 +27,14 @@ BEGIN
           AND status = 'ACTIVE'
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
 
 
 -- ============================================================
 -- fn_post_group: resolve group_id from a post_id
 -- ============================================================
--- CRITICAL: RLS policies on comments and post_upvotes need to
--- check membership in the post's group. But SELECT on posts is
--- revoked from authenticated. Without this DEFINER helper,
--- every comment insert and upvote insert throws
+-- Required because SELECT on posts is revoked from authenticated.
+-- Without this, comment/upvote INSERT policies fail with
 -- "permission denied for table posts".
 
 CREATE OR REPLACE FUNCTION fn_post_group(p_post_id UUID)
@@ -52,7 +49,7 @@ BEGIN
 
     RETURN v_group_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
 
 
 -- ============================================================
@@ -72,7 +69,7 @@ BEGIN
           AND author_user_id = auth.uid()
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
 
 
 -- ============================================================
@@ -92,15 +89,12 @@ BEGIN
           AND author_user_id = auth.uid()
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
 
 
 -- ============================================================
 -- fn_is_group_owner: check if caller has OWNER role
 -- ============================================================
--- Used by group update and entry question policies instead of
--- created_by_user_id (which never changes, contradicting the
--- democratic model).
 
 CREATE OR REPLACE FUNCTION fn_is_group_owner(p_group_id UUID)
 RETURNS BOOLEAN AS $$
@@ -117,4 +111,17 @@ BEGIN
           AND status = 'ACTIVE'
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
+
+
+-- ============================================================
+-- Revoke EXECUTE from anon on all helpers
+-- ============================================================
+-- Defence in depth: all functions check auth.uid() IS NULL,
+-- but anon should never call them in the first place.
+
+REVOKE EXECUTE ON FUNCTION fn_is_group_member(UUID) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_post_group(UUID) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_is_post_author(UUID) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_is_comment_author(UUID) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_is_group_owner(UUID) FROM anon;

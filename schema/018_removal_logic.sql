@@ -184,3 +184,10 @@ BEGIN
     RETURN v_request_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- ============================================================
+-- REVOKE from anon
+-- ============================================================
+
+REVOKE EXECUTE ON FUNCTION fn_cast_removal_vote(UUID, vote_decision) FROM anon;
+REVOKE EXECUTE ON FUNCTION fn_raise_removal_request(UUID, TEXT, TEXT) FROM anon;
