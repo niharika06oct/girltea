@@ -1,0 +1,7 @@
+<h2>Your GirlTea sign-in code</h2>
+<p>Enter this 6-digit code in the app to sign in:</p>
+<p style="font-size:28px;font-weight:bold;letter-spacing:4px">{{ .Token }}</p>
+<p>This code expires shortly and can only be used once.</p>
+<p>Or use this one-tap link instead:
+  <a href="{{ .SiteURL }}/auth/v1/verify?token={{ .TokenHash }}&type=magiclink&redirect_to={{ .RedirectTo }}">Sign in</a>
+</p>
