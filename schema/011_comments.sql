@@ -16,6 +16,12 @@ CREATE TABLE comments (
     post_id             UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
     author_user_id      UUID NOT NULL REFERENCES users(id),
 
+    -- Single-level nesting: a reply points at a top-level comment.
+    -- NULL = top-level comment. A trigger (fn_enforce_comment_depth)
+    -- rejects replies-to-replies and enforces same-post parentage,
+    -- since neither can be expressed as a column CHECK.
+    parent_comment_id   UUID REFERENCES comments(id) ON DELETE CASCADE,
+
     author_alias        TEXT NOT NULL,
     type                comment_type NOT NULL DEFAULT 'TEXT',
 

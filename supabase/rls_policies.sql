@@ -356,6 +356,7 @@ CREATE OR REPLACE VIEW comments_feed WITH (security_barrier = true) AS
 SELECT
     c.id,
     c.post_id,
+    c.parent_comment_id,
     c.author_alias,
     c.type,
     c.body,
