@@ -318,23 +318,68 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  late Future<List<Map<String, dynamic>>> _postsFuture;
+  List<Map<String, dynamic>>? _posts; // null = still loading
+  Object? _error;
+  String? _myAlias; // this user's anonymized alias in this group
 
   @override
   void initState() {
     super.initState();
-    _postsFuture = _loadPosts();
+    _loadPosts();
+    _loadMyAlias();
   }
 
-  Future<List<Map<String, dynamic>>> _loadPosts() async {
+  Future<void> _loadPosts() async {
     // Direct SELECT on `posts` is revoked by RLS — read the view,
     // which enforces membership and exposes only the alias.
+    try {
+      final rows = await supabase
+          .from('posts_feed')
+          .select('id, author_alias, type, body, upvote_count, created_at')
+          .eq('group_id', widget.groupId)
+          .order('created_at', ascending: false);
+      if (mounted) {
+        setState(() {
+          _posts = (rows as List).cast<Map<String, dynamic>>();
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
+  }
+
+  Future<void> _loadMyAlias() async {
+    // group_memberships SELECT is revoked; read our own alias from
+    // the members view (is_me = true) so we can stamp it on new posts.
     final rows = await supabase
-        .from('posts_feed')
-        .select('id, author_alias, type, body, upvote_count, created_at')
+        .from('group_members_view')
+        .select('alias')
         .eq('group_id', widget.groupId)
-        .order('created_at', ascending: false);
-    return (rows as List).cast<Map<String, dynamic>>();
+        .eq('is_me', true)
+        .limit(1);
+    if (rows.isNotEmpty && mounted) {
+      setState(() => _myAlias = rows.first['alias'] as String?);
+    }
+  }
+
+  Future<void> _openComposer() async {
+    final alias = _myAlias;
+    if (alias == null) return; // still loading membership
+    final created = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ComposePostSheet(
+        groupId: widget.groupId,
+        authorAlias: alias,
+      ),
+    );
+    if (created != null && mounted) {
+      // Show it immediately at the top, then reconcile with the view
+      // (which fills in the real id / server timestamp / counts).
+      setState(() => _posts = [created, ...?_posts]);
+      _loadPosts();
+    }
   }
 
   @override
@@ -345,23 +390,27 @@ class _FeedScreenState extends State<FeedScreen> {
         foregroundColor: Colors.white,
         title: Text(widget.groupName),
       ),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _postsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: _pink,
+        foregroundColor: Colors.white,
+        onPressed: _myAlias == null ? null : _openComposer,
+        icon: const Icon(Icons.edit),
+        label: const Text('Post'),
+      ),
+      body: Builder(
+        builder: (context) {
+          if (_error != null) {
+            return Center(child: Text('Error: $_error'));
+          }
+          final posts = _posts;
+          if (posts == null) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-          final posts = snapshot.data ?? [];
           if (posts.isEmpty) {
             return const Center(child: Text('No posts yet. Be the first!'));
           }
           return RefreshIndicator(
-            onRefresh: () async {
-              setState(() => _postsFuture = _loadPosts());
-            },
+            onRefresh: _loadPosts,
             child: ListView.separated(
               padding: const EdgeInsets.all(12),
               itemCount: posts.length,
@@ -397,6 +446,125 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// ============================================================
+// Compose — write a TEXT post to a group
+// ============================================================
+class ComposePostSheet extends StatefulWidget {
+  const ComposePostSheet({
+    super.key,
+    required this.groupId,
+    required this.authorAlias,
+  });
+
+  final String groupId;
+  final String authorAlias;
+
+  @override
+  State<ComposePostSheet> createState() => _ComposePostSheetState();
+}
+
+class _ComposePostSheetState extends State<ComposePostSheet> {
+  final _bodyController = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _submit() async {
+    final body = _bodyController.text.trim();
+    if (body.isEmpty) {
+      setState(() => _error = 'Write something first.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      // RLS "Members can create posts" checks author_user_id = auth.uid()
+      // and membership. author_alias is supplied by the client and locked
+      // immutable by trigger after insert. We don't chain .select() — SELECT
+      // on `posts` is revoked (feed is read via the view) — so we build the
+      // optimistic row locally for instant display; _loadPosts reconciles it.
+      await supabase.from('posts').insert({
+        'group_id': widget.groupId,
+        'author_user_id': supabase.auth.currentUser!.id,
+        'author_alias': widget.authorAlias,
+        'type': 'TEXT',
+        'body': body,
+      });
+      if (mounted) {
+        Navigator.of(context).pop(<String, dynamic>{
+          'author_alias': widget.authorAlias,
+          'type': 'TEXT',
+          'body': body,
+          'upvote_count': 0,
+        });
+      }
+    } on PostgrestException catch (e) {
+      setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Text('Posting as ',
+                  style: TextStyle(color: Colors.black54)),
+              Text(widget.authorAlias,
+                  style: const TextStyle(
+                      color: _pink, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _bodyController,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 6,
+            decoration: const InputDecoration(
+              hintText: "What's the tea? ☕️",
+              border: OutlineInputBorder(),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: Colors.red)),
+          ],
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: _busy ? null : _submit,
+            style: FilledButton.styleFrom(backgroundColor: _pink),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: _busy
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Post'),
+            ),
+          ),
+        ],
       ),
     );
   }
