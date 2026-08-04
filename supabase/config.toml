@@ -248,6 +248,12 @@ otp_expiry = 3600
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
 
+# Custom magic-link template that surfaces the 6-digit OTP ({{ .Token }})
+# so the app's verifyOTP(code) flow works, not just the magic link.
+[auth.email.template.magic_link]
+subject = "Your GirlTea sign-in code"
+content_path = "./supabase/templates/magic_link.html"
+
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
 # enabled = true
