@@ -11,7 +11,6 @@ erDiagram
         TEXT profession
         TEXT locale
         TEXT country_code
-        TEXT in_app_alias
         INT karma
         BOOLEAN is_deleted
         TIMESTAMPTZ created_at
@@ -40,6 +39,7 @@ erDiagram
         UUID user_id PK_FK
         membership_role role
         membership_status status
+        TEXT alias
         TIMESTAMPTZ joined_at
         TIMESTAMPTZ updated_at
     }
@@ -152,6 +152,12 @@ erDiagram
         TIMESTAMPTZ created_at
     }
 
+    post_upvotes {
+        UUID post_id PK_FK
+        UUID user_id PK_FK
+        TIMESTAMPTZ created_at
+    }
+
     reports {
         UUID id PK
         report_target_type target_type
@@ -193,6 +199,9 @@ erDiagram
 
     groups ||--o{ posts : "contains"
     users ||--o{ posts : "writes"
+
+    posts ||--o{ post_upvotes : "upvoted via"
+    users ||--o{ post_upvotes : "upvotes"
 
     posts ||--o{ comments : "has"
     users ||--o{ comments : "writes"

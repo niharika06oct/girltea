@@ -38,6 +38,54 @@ Comments on any post type support text, image, and voice:
 - No video comments — keeps the comment thread lightweight
 - Single-level nesting (no replies to replies)
 
+### Alias Strategy
+
+Aliases are **stable per group, different across groups**:
+
+| Property | Value |
+|---|---|
+| Where alias lives | `group_memberships.alias` |
+| Generated | On join (by `fn_generate_alias()`) |
+| Stability | Same alias for all your posts/comments in that group |
+| Cross-group | Different alias in each group |
+| On posts/comments | Snapshotted at write time from membership alias |
+| If alias regenerated | Old posts keep the old alias (thread continuity) |
+| Format | `{Adjective}{Noun}{00-99}` e.g. "StormyMuse27", "VelvetPhoenix04" |
+
+**Why not per-user global alias:** In a 6-person work group, a stable global
+alias is identified by writing style within a week. Per-group aliases mean your
+school group persona is disconnected from your work group persona.
+
+**Why not per-post rotating:** Threading breaks — you can't follow a conversation
+if the author changes every post. Per-group stability preserves context.
+
+### Anonymity Enforcement
+
+`author_user_id` exists in the `posts` and `comments` base tables for internal
+use (moderation, "delete my post," cascading account deletion). But clients
+**never** see it.
+
+**How it works:**
+- Direct `SELECT` on `posts` and `comments` is revoked from `authenticated`
+- Clients read through `posts_feed` and `comments_feed` views
+- Views omit `author_user_id` and provide `is_mine` boolean instead
+- Views use `security_barrier` to prevent optimizer-based data leaks
+- Views include `fn_is_group_member()` checks so membership is enforced
+
+**What the client sees per post:**
+`id`, `group_id`, `author_alias`, `type`, `body`, `media_url`,
+`duration_seconds`, `thumbnail_url`, `upvote_count`, `created_at`,
+`updated_at`, `is_mine`
+
+**What the client does NOT see:**
+`author_user_id`, `deleted_at`, `is_deleted` (filtered in view)
+
+### Upvotes (tea drops)
+
+`post_upvotes` tracks who upvoted which post via a composite PK `(post_id, user_id)`.
+This prevents double-tapping at the database level. A trigger on insert/delete
+atomically maintains the denormalized `posts.upvote_count`.
+
 ---
 
 ## Suggestion Assessment

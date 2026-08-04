@@ -9,8 +9,12 @@ CREATE TABLE group_memberships (
     role        membership_role NOT NULL DEFAULT 'MEMBER',
     status      membership_status NOT NULL DEFAULT 'ACTIVE',
 
+    alias       TEXT NOT NULL,
+
     joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    PRIMARY KEY (group_id, user_id)
+    PRIMARY KEY (group_id, user_id),
+
+    CONSTRAINT uq_alias_per_group UNIQUE (group_id, alias)
 );

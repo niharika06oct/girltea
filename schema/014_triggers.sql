@@ -71,6 +71,83 @@ BEFORE UPDATE ON group_entry_questions
 FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 
+-- ---- Column-lock: reject changes to immutable fields on posts ----
+-- FIX #3: Without this, an author can rewrite author_alias to
+-- attribute their words to another member, or move group_id to
+-- drop a post into a room they're not in.
+
+CREATE OR REPLACE FUNCTION fn_lock_post_columns()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.author_user_id != OLD.author_user_id THEN
+        RAISE EXCEPTION 'Cannot change post author';
+    END IF;
+    IF NEW.author_alias != OLD.author_alias THEN
+        RAISE EXCEPTION 'Cannot change post alias';
+    END IF;
+    IF NEW.group_id != OLD.group_id THEN
+        RAISE EXCEPTION 'Cannot move post to another group';
+    END IF;
+    IF NEW.type != OLD.type THEN
+        RAISE EXCEPTION 'Cannot change post type';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_lock_post_columns
+BEFORE UPDATE ON posts
+FOR EACH ROW EXECUTE FUNCTION fn_lock_post_columns();
+
+
+-- ---- Column-lock: reject changes to immutable fields on comments ----
+
+CREATE OR REPLACE FUNCTION fn_lock_comment_columns()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.author_user_id != OLD.author_user_id THEN
+        RAISE EXCEPTION 'Cannot change comment author';
+    END IF;
+    IF NEW.author_alias != OLD.author_alias THEN
+        RAISE EXCEPTION 'Cannot change comment alias';
+    END IF;
+    IF NEW.post_id != OLD.post_id THEN
+        RAISE EXCEPTION 'Cannot move comment to another post';
+    END IF;
+    IF NEW.type != OLD.type THEN
+        RAISE EXCEPTION 'Cannot change comment type';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_lock_comment_columns
+BEFORE UPDATE ON comments
+FOR EACH ROW EXECUTE FUNCTION fn_lock_comment_columns();
+
+
+-- ---- Auto-update upvote_count on posts ----
+
+CREATE OR REPLACE FUNCTION fn_update_post_upvote_count()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        UPDATE posts SET upvote_count = upvote_count + 1
+        WHERE id = NEW.post_id;
+    ELSIF TG_OP = 'DELETE' THEN
+        UPDATE posts SET upvote_count = GREATEST(upvote_count - 1, 0)
+        WHERE id = OLD.post_id;
+    END IF;
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_post_upvote_count
+AFTER INSERT OR DELETE ON post_upvotes
+FOR EACH ROW EXECUTE FUNCTION fn_update_post_upvote_count();
+
+
 -- ---- Auto-expire stale requests ----
 -- Typically run as a scheduled job (pg_cron or app-level).
 
