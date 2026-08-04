@@ -24,7 +24,7 @@ about life — in trusted, closed groups with real approval flows.
 ```
 girltea/
 ├── README.md                          ← You are here
-├── schema/                            ← PostgreSQL data model (19 SQL files)
+├── schema/                            ← PostgreSQL data model (21 SQL files)
 │   ├── 001_enums.sql                  ← All enum types
 │   ├── 002_users.sql                  ← User profiles
 │   ├── 003_groups.sql                 ← Groups with policy/visibility/settings
@@ -51,7 +51,9 @@ girltea/
 │   ├── schema-diagram.svg             ← ER diagram (scalable)
 │   └── schema-diagram.mmd            ← ER diagram (editable Mermaid source)
 └── supabase/                          ← Supabase configuration
+    ├── config.toml                    ← Supabase CLI config for local dev stack
     ├── auth_setup.sql                 ← Links app users to Supabase Auth
+    ├── auth_helpers.sql               ← Auth helper functions used by RLS/RPCs
     ├── rls_policies.sql               ← Row Level Security for all 14 tables
     ├── storage_buckets.sql            ← Storage bucket definitions
     ├── storage_policies.sql           ← Storage access policies
@@ -175,6 +177,7 @@ Enter phone/email → receive 6-digit OTP → verify
 | File | Purpose |
 |---|---|
 | `supabase/auth_setup.sql` | FK to `auth.users`, helper functions `fn_has_profile()`, `fn_my_profile()` |
+| `supabase/auth_helpers.sql` | Additional auth helper functions used by RLS policies and RPCs |
 | `supabase/rls_policies.sql` | Row Level Security policies for all 14 tables |
 | `supabase/AUTH.md` | Full setup guide: enable OTP, Flutter code examples, SMS costs |
 
@@ -241,17 +244,23 @@ cd girltea
 
 ### 3. Run the schema
 
-In the Supabase **SQL Editor**, run files in order:
+Apply the SQL in **dependency order, not strict numeric order** — `013_indexes.sql`
+and `014_triggers.sql` reference tables created in later-numbered files (`016`, `017`,
+`019`), so running them in plain 001→021 order fails. Run all table/enum DDL first,
+then indexes/triggers/functions:
 
-1. `schema/001_enums.sql` through `schema/019_post_upvotes.sql` (in numbered order)
-2. `schema/013_indexes.sql`
-3. `schema/014_triggers.sql`
-4. `schema/015_approval_logic.sql`
-5. `schema/018_removal_logic.sql`
+1. Tables & enums: `001_enums` → `012_reports`, then `016_group_removal_requests`,
+   `017_group_removal_votes`, `019_post_upvotes`
+2. Indexes & triggers: `013_indexes`, `014_triggers`
+3. Functions & RPCs: `020_alias_generator`, `015_approval_logic`, `018_removal_logic`,
+   `021_hub_rpcs`
+
+If you have the Supabase CLI and `psql` locally, the loop in `AGENTS.md` applies
+everything in the correct order in one step.
 
 ### 4. Set up auth
 
-1. Run `supabase/auth_setup.sql` in the SQL Editor
+1. Run `supabase/auth_setup.sql`, then `supabase/auth_helpers.sql` in the SQL Editor
 2. Enable Phone and/or Email OTP in **Authentication** → **Providers**
 3. See `supabase/AUTH.md` for detailed steps
 
