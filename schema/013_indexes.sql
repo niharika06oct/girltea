@@ -77,6 +77,10 @@ CREATE INDEX idx_comments_post ON comments (post_id, created_at)
 CREATE INDEX idx_comments_post_type ON comments (post_id, type, created_at)
     WHERE is_deleted = FALSE;
 
+-- Fetch a top-level comment's replies in order.
+CREATE INDEX idx_comments_parent ON comments (parent_comment_id, created_at)
+    WHERE is_deleted = FALSE AND parent_comment_id IS NOT NULL;
+
 -- ---- Removal Requests ----
 CREATE INDEX idx_removal_requests_group_pending ON group_removal_requests (group_id, status)
     WHERE status = 'PENDING';

@@ -36,7 +36,10 @@ Comments on any post type support text, image, and voice:
 | `VOICE` | `media_url`, `duration_seconds` | Max 180 seconds (3 minutes) |
 
 - No video comments — keeps the comment thread lightweight
-- Single-level nesting (no replies to replies)
+- Single-level nesting: a comment may reply to a top-level comment
+  (`parent_comment_id`), but replies cannot themselves be replied to.
+  Enforced by the `fn_enforce_comment_depth` trigger, which also
+  rejects cross-post parentage.
 
 ### Alias Strategy
 
