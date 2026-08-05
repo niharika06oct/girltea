@@ -37,6 +37,10 @@ dependencies:
   supabase_flutter: ^2.16.0
   image_picker: ^1.2.3
   uuid: ^4.6.0
+  record: ^7.1.1
+  just_audio: ^0.10.6
+  video_player: ^2.13.0
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:

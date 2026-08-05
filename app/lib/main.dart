@@ -1,9 +1,15 @@
+import 'dart:async';
+import 'dart:html' as html;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
+import 'package:video_player/video_player.dart';
 
 import 'config.dart';
 
@@ -70,6 +76,213 @@ class _SignedImageState extends State<SignedImage> {
           child: Image.network(url, fit: BoxFit.cover),
         );
       },
+    );
+  }
+}
+
+/// Formats a duration in seconds as m:ss (e.g. 83 -> "1:23").
+String _fmtDuration(int seconds) {
+  final m = seconds ~/ 60;
+  final s = seconds % 60;
+  return '$m:${s.toString().padLeft(2, '0')}';
+}
+
+/// Plays a video stored in the private `post-media` bucket via a signed URL.
+/// Shows a tap-to-play overlay; the underlying object path lives in
+/// posts.media_url.
+class SignedVideo extends StatefulWidget {
+  const SignedVideo({super.key, required this.path});
+
+  final String path;
+
+  @override
+  State<SignedVideo> createState() => _SignedVideoState();
+}
+
+class _SignedVideoState extends State<SignedVideo> {
+  VideoPlayerController? _controller;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final url = await supabase.storage
+          .from('post-media')
+          .createSignedUrl(widget.path, 60 * 60);
+      final c = VideoPlayerController.networkUrl(Uri.parse(url));
+      await c.initialize();
+      c.addListener(() {
+        if (mounted) setState(() {});
+      });
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      setState(() => _controller = c);
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return const AspectRatio(
+        aspectRatio: 16 / 9,
+        child: ColoredBox(
+          color: Color(0xFFF0F0F0),
+          child: Icon(Icons.broken_image, color: Colors.black26),
+        ),
+      );
+    }
+    final c = _controller;
+    if (c == null) {
+      return const AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: AspectRatio(
+        aspectRatio: c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            VideoPlayer(c),
+            // Tap anywhere to toggle play/pause.
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  c.value.isPlaying ? c.pause() : c.play();
+                });
+              },
+              child: AnimatedOpacity(
+                opacity: c.value.isPlaying ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                child: Container(
+                  color: Colors.black26,
+                  child: const Center(
+                    child: Icon(Icons.play_circle_fill,
+                        size: 56, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Plays a voice recording stored in the private `post-media` bucket via a
+/// signed URL. Renders as a compact play/pause pill with the duration.
+class SignedAudio extends StatefulWidget {
+  const SignedAudio({super.key, required this.path, this.durationSeconds});
+
+  final String path;
+  final int? durationSeconds;
+
+  @override
+  State<SignedAudio> createState() => _SignedAudioState();
+}
+
+class _SignedAudioState extends State<SignedAudio> {
+  final _player = AudioPlayer();
+  bool _loaded = false;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final url = await supabase.storage
+          .from('post-media')
+          .createSignedUrl(widget.path, 60 * 60);
+      await _player.setUrl(url);
+      if (mounted) setState(() => _loaded = true);
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFDE7EF),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_error != null)
+            const Icon(Icons.error_outline, color: Colors.black38)
+          else if (!_loaded)
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            StreamBuilder<PlayerState>(
+              stream: _player.playerStateStream,
+              builder: (context, snapshot) {
+                final playing = snapshot.data?.playing ?? false;
+                final completed =
+                    snapshot.data?.processingState == ProcessingState.completed;
+                final isPlaying = playing && !completed;
+                return GestureDetector(
+                  onTap: () async {
+                    if (isPlaying) {
+                      await _player.pause();
+                    } else {
+                      if (completed) await _player.seek(Duration.zero);
+                      await _player.play();
+                    }
+                  },
+                  child: Icon(
+                    isPlaying
+                        ? Icons.pause_circle_filled
+                        : Icons.play_circle_fill,
+                    size: 32,
+                    color: _pink,
+                  ),
+                );
+              },
+            ),
+          const SizedBox(width: 8),
+          const Icon(Icons.graphic_eq, size: 18, color: _pink),
+          if (widget.durationSeconds != null) ...[
+            const SizedBox(width: 6),
+            Text(_fmtDuration(widget.durationSeconds!),
+                style: const TextStyle(color: Colors.black54)),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -396,7 +609,7 @@ class _FeedScreenState extends State<FeedScreen> {
       final rows = await supabase
           .from('posts_feed')
           .select(
-              'id, author_alias, type, body, media_url, upvote_count, created_at')
+              'id, author_alias, type, body, media_url, duration_seconds, upvote_count, created_at')
           .eq('group_id', widget.groupId)
           .order('created_at', ascending: false);
       if (mounted) {
@@ -575,15 +788,22 @@ class _FeedScreenState extends State<FeedScreen> {
                                 fontWeight: FontWeight.bold, color: _pink),
                           ),
                           const SizedBox(height: 6),
-                          if (p['type'] == 'IMAGE' &&
-                              p['media_url'] != null) ...[
-                            SignedImage(path: p['media_url'] as String),
+                          if (p['media_url'] != null) ...[
+                            if (p['type'] == 'IMAGE')
+                              SignedImage(path: p['media_url'] as String)
+                            else if (p['type'] == 'VIDEO')
+                              SignedVideo(path: p['media_url'] as String)
+                            else if (p['type'] == 'VOICE')
+                              SignedAudio(
+                                path: p['media_url'] as String,
+                                durationSeconds: p['duration_seconds'] as int?,
+                              ),
                             if ((p['body'] as String?)?.isNotEmpty ?? false)
                               const SizedBox(height: 6),
                           ],
                           if ((p['body'] as String?)?.isNotEmpty ?? false)
                             Text(p['body'] as String)
-                          else if (p['type'] != 'IMAGE')
+                          else if (p['type'] == 'TEXT')
                             Text('[${p['type']}]'),
                           const SizedBox(height: 6),
                           Row(
@@ -644,19 +864,43 @@ class ComposePostSheet extends StatefulWidget {
   State<ComposePostSheet> createState() => _ComposePostSheetState();
 }
 
+// What kind of media (if any) is attached to the post being composed.
+enum _Media { none, image, video, voice }
+
 class _ComposePostSheetState extends State<ComposePostSheet> {
   final _bodyController = TextEditingController();
   bool _busy = false;
   String? _error;
 
-  // Selected image (bytes so it works on web and mobile alike).
-  Uint8List? _imageBytes;
-  String? _imageName;
+  // Selected/recorded media. Held as bytes so it works on web and mobile.
+  _Media _media = _Media.none;
+  Uint8List? _mediaBytes;
+  String? _mediaName; // original filename, for extension/content-type
+  int? _durationSeconds; // required for VIDEO/VOICE
+
+  // Voice recording state.
+  final _recorder = AudioRecorder();
+  bool _recording = false;
+  int _recordSeconds = 0;
+  Timer? _recordTimer;
+
+  static const _maxDurationSeconds = 180; // DB caps VIDEO/VOICE at 180s
 
   @override
   void dispose() {
     _bodyController.dispose();
+    _recordTimer?.cancel();
+    _recorder.dispose();
     super.dispose();
+  }
+
+  void _clearMedia() {
+    setState(() {
+      _media = _Media.none;
+      _mediaBytes = null;
+      _mediaName = null;
+      _durationSeconds = null;
+    });
   }
 
   Future<void> _pickImage() async {
@@ -670,8 +914,10 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
       final bytes = await picked.readAsBytes();
       if (mounted) {
         setState(() {
-          _imageBytes = bytes;
-          _imageName = picked.name;
+          _media = _Media.image;
+          _mediaBytes = bytes;
+          _mediaName = picked.name;
+          _durationSeconds = null;
           _error = null;
         });
       }
@@ -680,7 +926,194 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
     }
   }
 
-  String _contentType(String name) {
+  Future<void> _pickVideo(ImageSource source) async {
+    try {
+      final picked = await ImagePicker().pickVideo(
+        source: source,
+        maxDuration: const Duration(seconds: _maxDurationSeconds),
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+
+      // The post-media bucket caps files at 100 MB — fail fast with a clear
+      // message rather than erroring out mid-upload.
+      if (bytes.lengthInBytes > 100 * 1024 * 1024) {
+        if (mounted) {
+          setState(() => _error = 'That video is over 100 MB. Pick a shorter '
+              'or more compressed clip.');
+        }
+        return;
+      }
+
+      // Probe the real duration — maxDuration isn't enforced when picking an
+      // existing file on web, and the DB rejects anything over 180s.
+      final seconds = await _probeVideoDuration(bytes, picked.name);
+      if (seconds == null) {
+        if (mounted) {
+          setState(() => _error = "Couldn't read the video's length.");
+        }
+        return;
+      }
+      if (seconds > _maxDurationSeconds) {
+        if (mounted) {
+          setState(() => _error =
+              'Videos must be 3 minutes or less (this one is ${_fmtDuration(seconds)}).');
+        }
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _media = _Media.video;
+          _mediaBytes = bytes;
+          _mediaName = picked.name;
+          _durationSeconds = seconds;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not pick video: $e');
+    }
+  }
+
+  // Reads a video's duration without uploading it, using an off-screen HTML
+  // <video> element pointed at a blob object URL. A blob URL is a short handle
+  // the browser streams from memory, so it works for large clips — unlike a
+  // base64 data URI, which browsers reject once it's more than a few MB.
+  // Returns whole seconds, or null if it can't be read.
+  Future<int?> _probeVideoDuration(Uint8List bytes, String name) async {
+    final blob = html.Blob([bytes], _videoContentType(name));
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final video = html.VideoElement()
+      ..preload = 'metadata'
+      ..src = url;
+    try {
+      // Wait for metadata (duration) to load, or bail on error.
+      await video.onLoadedMetadata.first
+          .timeout(const Duration(seconds: 15));
+      final seconds = video.duration; // in fractional seconds
+      if (seconds.isNaN || seconds.isInfinite || seconds <= 0) return null;
+      // Round up so a 0.4s clip still counts as 1s (DB requires >= 1).
+      return seconds.ceil();
+    } catch (_) {
+      return null;
+    } finally {
+      video.removeAttribute('src');
+      html.Url.revokeObjectUrl(url);
+    }
+  }
+
+  Future<void> _toggleRecording() async {
+    if (_recording) {
+      await _stopRecording();
+      return;
+    }
+    try {
+      if (!await _recorder.hasPermission()) {
+        if (mounted) {
+          setState(() => _error = 'Microphone permission is needed to record.');
+        }
+        return;
+      }
+      // Web: record to an in-memory stream and get back a blob URL on stop.
+      await _recorder.start(
+        const RecordConfig(encoder: AudioEncoder.opus),
+        path: '', // ignored on web; a blob URL is returned from stop()
+      );
+      _recordSeconds = 0;
+      _recordTimer =
+          Timer.periodic(const Duration(seconds: 1), (t) async {
+        if (!mounted) return;
+        setState(() => _recordSeconds++);
+        if (_recordSeconds >= _maxDurationSeconds) {
+          await _stopRecording();
+        }
+      });
+      setState(() {
+        _recording = true;
+        _media = _Media.voice;
+        _mediaBytes = null;
+        _error = null;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _recording = false;
+          _error = 'Could not start recording: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    _recordTimer?.cancel();
+    _recordTimer = null;
+    try {
+      final result = await _recorder.stop(); // blob URL (web) or file path
+      final seconds = _recordSeconds;
+      // record_web returns a blob: URL; fetch it back as bytes.
+      final bytes = await _fetchRecordedBytes(result);
+      if (bytes == null || seconds < 1) {
+        if (mounted) {
+          setState(() {
+            _recording = false;
+            _media = _Media.none;
+            _error = 'Recording was too short.';
+          });
+        }
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _recording = false;
+          _media = _Media.voice;
+          _mediaBytes = bytes;
+          _mediaName = 'voice.webm';
+          _durationSeconds = seconds;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _recording = false;
+          _error = 'Could not finish recording: $e';
+        });
+      }
+    }
+  }
+
+  // Fetches bytes from the blob/file URL returned by recorder.stop(). On web
+  // this is a `blob:` URL, which the HTTP client can GET in-page.
+  Future<Uint8List?> _fetchRecordedBytes(String? url) async {
+    if (url == null) return null;
+    try {
+      final resp = await http.get(Uri.parse(url));
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        return resp.bodyBytes;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _videoContentType(String name) {
+    final n = name.toLowerCase();
+    if (n.endsWith('.webm')) return 'video/webm';
+    if (n.endsWith('.mov')) return 'video/quicktime';
+    return 'video/mp4';
+  }
+
+  String _audioContentType(String name) {
+    final n = name.toLowerCase();
+    if (n.endsWith('.mp3')) return 'audio/mpeg';
+    if (n.endsWith('.m4a')) return 'audio/mp4';
+    if (n.endsWith('.aac')) return 'audio/aac';
+    if (n.endsWith('.ogg')) return 'audio/ogg';
+    if (n.endsWith('.wav')) return 'audio/wav';
+    return 'audio/webm';
+  }
+
+  String _imageContentType(String name) {
     final n = name.toLowerCase();
     if (n.endsWith('.png')) return 'image/png';
     if (n.endsWith('.webp')) return 'image/webp';
@@ -691,20 +1124,25 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
   // Picked filenames can contain spaces, parentheses, or unicode (e.g.
   // "Screenshot (3).png"), which Supabase Storage rejects with "Invalid
   // key". We only need the extension — the object base name is fixed.
-  String _safeExtension(String? name) {
+  String _safeExtension(String? name, List<String> allowed, String fallback) {
     final n = (name ?? '').toLowerCase();
-    for (final ext in const ['png', 'webp', 'gif', 'jpeg', 'jpg']) {
+    for (final ext in allowed) {
       if (n.endsWith('.$ext')) return ext;
     }
-    return 'jpg';
+    return fallback;
   }
 
   Future<void> _submit() async {
     final body = _bodyController.text.trim();
-    final image = _imageBytes;
-    // A post needs a body (text) or an image.
-    if (body.isEmpty && image == null) {
-      setState(() => _error = 'Write something or add a photo.');
+    final bytes = _mediaBytes;
+    final hasMedia = _media != _Media.none && bytes != null;
+
+    if (body.isEmpty && !hasMedia) {
+      setState(() => _error = 'Write something or add media.');
+      return;
+    }
+    if (_recording) {
+      setState(() => _error = 'Stop the recording first.');
       return;
     }
     setState(() {
@@ -713,46 +1151,10 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
     });
 
     final uid = supabase.auth.currentUser!.id;
-    final isImage = image != null;
 
     try {
-      if (isImage) {
-        // Storage RLS gates upload on the post's group, resolved from the
-        // postId in the object path — so the post row must exist first, and
-        // the media_url CHECK requires a URL at insert time. We therefore
-        // generate the id client-side and set media_url to the path we're
-        // about to upload to, then upload the bytes.
-        final postId = const Uuid().v4();
-        final safeName = 'photo.${_safeExtension(_imageName)}';
-        final path = '$postId/$safeName';
-
-        await supabase.from('posts').insert({
-          'id': postId,
-          'group_id': widget.groupId,
-          'author_user_id': uid,
-          'author_alias': widget.authorAlias,
-          'type': 'IMAGE',
-          'media_url': path,
-          if (body.isNotEmpty) 'body': body,
-        });
-
-        await supabase.storage.from('post-media').uploadBinary(
-              path,
-              image,
-              fileOptions: FileOptions(contentType: _contentType(safeName)),
-            );
-
-        if (mounted) {
-          Navigator.of(context).pop(<String, dynamic>{
-            'id': postId,
-            'author_alias': widget.authorAlias,
-            'type': 'IMAGE',
-            'body': body,
-            'media_url': path,
-            'upvote_count': 0,
-          });
-        }
-      } else {
+      if (!hasMedia) {
+        // Plain TEXT post.
         await supabase.from('posts').insert({
           'group_id': widget.groupId,
           'author_user_id': uid,
@@ -768,6 +1170,66 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
             'upvote_count': 0,
           });
         }
+        return;
+      }
+
+      // Media post. Storage RLS resolves the group from the postId in the
+      // object path, so the post row must exist before the upload; the
+      // media_url CHECK also requires a URL at insert time. Generate the id
+      // client-side and set media_url to the path we're about to write.
+      final postId = const Uuid().v4();
+      final String type;
+      final String fileName;
+      final String contentType;
+      switch (_media) {
+        case _Media.image:
+          type = 'IMAGE';
+          fileName =
+              'photo.${_safeExtension(_mediaName, const ['png', 'webp', 'gif', 'jpeg', 'jpg'], 'jpg')}';
+          contentType = _imageContentType(fileName);
+        case _Media.video:
+          type = 'VIDEO';
+          fileName =
+              'video.${_safeExtension(_mediaName, const ['mp4', 'webm', 'mov'], 'mp4')}';
+          contentType = _videoContentType(fileName);
+        case _Media.voice:
+          type = 'VOICE';
+          fileName =
+              'voice.${_safeExtension(_mediaName, const ['webm', 'm4a', 'mp3', 'aac', 'ogg', 'wav'], 'webm')}';
+          contentType = _audioContentType(fileName);
+        case _Media.none:
+          return; // unreachable — guarded by hasMedia
+      }
+      final path = '$postId/$fileName';
+      final isTimed = _media == _Media.video || _media == _Media.voice;
+
+      await supabase.from('posts').insert({
+        'id': postId,
+        'group_id': widget.groupId,
+        'author_user_id': uid,
+        'author_alias': widget.authorAlias,
+        'type': type,
+        'media_url': path,
+        if (isTimed) 'duration_seconds': _durationSeconds,
+        if (body.isNotEmpty) 'body': body,
+      });
+
+      await supabase.storage.from('post-media').uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType),
+          );
+
+      if (mounted) {
+        Navigator.of(context).pop(<String, dynamic>{
+          'id': postId,
+          'author_alias': widget.authorAlias,
+          'type': type,
+          'body': body,
+          'media_url': path,
+          if (isTimed) 'duration_seconds': _durationSeconds,
+          'upvote_count': 0,
+        });
       }
     } on PostgrestException catch (e) {
       setState(() => _error = e.message);
@@ -778,9 +1240,112 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
     }
   }
 
+  // Small pink circle "remove" button shown on media previews.
+  Widget _removeMediaButton() {
+    return Padding(
+      padding: const EdgeInsets.all(4),
+      child: CircleAvatar(
+        backgroundColor: Colors.black54,
+        radius: 16,
+        child: IconButton(
+          icon: const Icon(Icons.close, size: 16, color: Colors.white),
+          tooltip: 'Remove',
+          onPressed: _busy ? null : _clearMedia,
+        ),
+      ),
+    );
+  }
+
+  Widget _mediaPreview() {
+    final bytes = _mediaBytes;
+    switch (_media) {
+      case _Media.image:
+        if (bytes == null) return const SizedBox.shrink();
+        return Stack(
+          alignment: Alignment.topRight,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(bytes,
+                  height: 180, width: double.infinity, fit: BoxFit.cover),
+            ),
+            _removeMediaButton(),
+          ],
+        );
+      case _Media.video:
+        return Stack(
+          alignment: Alignment.topRight,
+          children: [
+            Container(
+              height: 120,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEDEDED),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.movie_outlined, color: _pink),
+                    const SizedBox(width: 8),
+                    Text('Video ready'
+                        '${_durationSeconds != null ? ' · ${_fmtDuration(_durationSeconds!)}' : ''}',
+                        style: const TextStyle(color: Colors.black54)),
+                  ],
+                ),
+              ),
+            ),
+            _removeMediaButton(),
+          ],
+        );
+      case _Media.voice:
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFDE7EF),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              if (_recording) ...[
+                const Icon(Icons.fiber_manual_record,
+                    color: Colors.red, size: 16),
+                const SizedBox(width: 8),
+                Text('Recording… ${_fmtDuration(_recordSeconds)}',
+                    style: const TextStyle(color: Colors.black87)),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _stopRecording,
+                  icon: const Icon(Icons.stop_circle, color: _pink),
+                  label: const Text('Stop'),
+                ),
+              ] else ...[
+                const Icon(Icons.graphic_eq, color: _pink),
+                const SizedBox(width: 8),
+                Text('Voice note'
+                    '${_durationSeconds != null ? ' · ${_fmtDuration(_durationSeconds!)}' : ''}',
+                    style: const TextStyle(color: Colors.black87)),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.black54),
+                  tooltip: 'Remove',
+                  onPressed: _busy ? null : _clearMedia,
+                ),
+              ],
+            ],
+          ),
+        );
+      case _Media.none:
+        return const SizedBox.shrink();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final image = _imageBytes;
+    final hasMedia = _media != _Media.none;
+    // Only offer the media toolbar when nothing is attached yet — one media
+    // item per post (matches the schema: no mixing media types).
+    final showToolbar = !hasMedia && !_recording;
     return Padding(
       padding: EdgeInsets.only(
         left: 16,
@@ -802,37 +1367,8 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
             ],
           ),
           const SizedBox(height: 12),
-          if (image != null) ...[
-            Stack(
-              alignment: Alignment.topRight,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(image,
-                      height: 180,
-                      width: double.infinity,
-                      fit: BoxFit.cover),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: CircleAvatar(
-                    backgroundColor: Colors.black54,
-                    radius: 16,
-                    child: IconButton(
-                      icon: const Icon(Icons.close,
-                          size: 16, color: Colors.white),
-                      tooltip: 'Remove photo',
-                      onPressed: _busy
-                          ? null
-                          : () => setState(() {
-                                _imageBytes = null;
-                                _imageName = null;
-                              }),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          if (hasMedia || _recording) ...[
+            _mediaPreview(),
             const SizedBox(height: 12),
           ],
           TextField(
@@ -841,8 +1377,7 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
             minLines: 3,
             maxLines: 6,
             decoration: InputDecoration(
-              hintText:
-                  image == null ? "What's the tea? ☕️" : 'Add a caption…',
+              hintText: hasMedia ? 'Add a caption…' : "What's the tea? ☕️",
               border: const OutlineInputBorder(),
             ),
           ),
@@ -853,16 +1388,30 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
           const SizedBox(height: 12),
           Row(
             children: [
-              IconButton(
-                onPressed: _busy ? null : _pickImage,
-                icon: const Icon(Icons.image_outlined),
-                color: _pink,
-                tooltip: 'Add photo',
-              ),
-              const SizedBox(width: 8),
+              if (showToolbar) ...[
+                IconButton(
+                  onPressed: _busy ? null : _pickImage,
+                  icon: const Icon(Icons.image_outlined),
+                  color: _pink,
+                  tooltip: 'Add photo',
+                ),
+                IconButton(
+                  onPressed: _busy ? null : () => _pickVideoMenu(context),
+                  icon: const Icon(Icons.videocam_outlined),
+                  color: _pink,
+                  tooltip: 'Add video',
+                ),
+                IconButton(
+                  onPressed: _busy ? null : _toggleRecording,
+                  icon: const Icon(Icons.mic_none),
+                  color: _pink,
+                  tooltip: 'Record voice',
+                ),
+              ],
+              const Spacer(),
               Expanded(
                 child: FilledButton(
-                  onPressed: _busy ? null : _submit,
+                  onPressed: (_busy || _recording) ? null : _submit,
                   style: FilledButton.styleFrom(backgroundColor: _pink),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
@@ -882,6 +1431,32 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
         ],
       ),
     );
+  }
+
+  // Video can come from an existing file or (where supported) the camera.
+  Future<void> _pickVideoMenu(BuildContext context) async {
+    final choice = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.video_library_outlined, color: _pink),
+              title: const Text('Choose a video'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined, color: _pink),
+              title: const Text('Record a video'),
+              subtitle: const Text('Uses your camera where supported'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice != null) await _pickVideo(choice);
   }
 }
 
