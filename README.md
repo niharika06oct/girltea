@@ -286,7 +286,8 @@ These go into the Flutter app's Supabase initialization.
 
 | Area | Status |
 |---|---|
-| Flutter app | Not started — next step |
+| Flutter app — auth, group feed, posts (text/image/video/voice), threaded comments, upvotes | Built |
+| Flutter app — group creation, join/approval, removal flows | Not started — next step |
 | Push notifications | Not started |
 | Cloud Function for video duration validation (FFprobe) | Deferred to post-MVP |
 | Image thumbnail generation | Deferred to post-MVP |
