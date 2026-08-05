@@ -1,5 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import 'config.dart';
 
@@ -15,6 +19,60 @@ Future<void> main() async {
 final supabase = Supabase.instance.client;
 
 const _pink = Color(0xFFD6336C);
+
+/// Renders an image stored in the private `post-media` bucket. The bucket
+/// is not public, so we mint a short-lived signed URL for the object path
+/// (stored in posts.media_url) and load it with Image.network.
+class SignedImage extends StatefulWidget {
+  const SignedImage({super.key, required this.path});
+
+  final String path; // object path, e.g. "{postId}/photo.jpg"
+
+  @override
+  State<SignedImage> createState() => _SignedImageState();
+}
+
+class _SignedImageState extends State<SignedImage> {
+  late Future<String> _urlFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _urlFuture = supabase.storage.from('post-media').createSignedUrl(
+          widget.path,
+          60 * 60, // 1 hour
+        );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: _urlFuture,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const AspectRatio(
+            aspectRatio: 16 / 9,
+            child: ColoredBox(
+              color: Color(0xFFF0F0F0),
+              child: Icon(Icons.broken_image, color: Colors.black26),
+            ),
+          );
+        }
+        final url = snapshot.data;
+        if (url == null) {
+          return const AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(url, fit: BoxFit.cover),
+        );
+      },
+    );
+  }
+}
 
 class GirlTeaApp extends StatelessWidget {
   const GirlTeaApp({super.key});
@@ -337,7 +395,8 @@ class _FeedScreenState extends State<FeedScreen> {
     try {
       final rows = await supabase
           .from('posts_feed')
-          .select('id, author_alias, type, body, upvote_count, created_at')
+          .select(
+              'id, author_alias, type, body, media_url, upvote_count, created_at')
           .eq('group_id', widget.groupId)
           .order('created_at', ascending: false);
       if (mounted) {
@@ -516,7 +575,16 @@ class _FeedScreenState extends State<FeedScreen> {
                                 fontWeight: FontWeight.bold, color: _pink),
                           ),
                           const SizedBox(height: 6),
-                          Text(p['body'] ?? '[${p['type']}]'),
+                          if (p['type'] == 'IMAGE' &&
+                              p['media_url'] != null) ...[
+                            SignedImage(path: p['media_url'] as String),
+                            if ((p['body'] as String?)?.isNotEmpty ?? false)
+                              const SizedBox(height: 6),
+                          ],
+                          if ((p['body'] as String?)?.isNotEmpty ?? false)
+                            Text(p['body'] as String)
+                          else if (p['type'] != 'IMAGE')
+                            Text('[${p['type']}]'),
                           const SizedBox(height: 6),
                           Row(
                             children: [
@@ -581,39 +649,130 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
   bool _busy = false;
   String? _error;
 
+  // Selected image (bytes so it works on web and mobile alike).
+  Uint8List? _imageBytes;
+  String? _imageName;
+
+  @override
+  void dispose() {
+    _bodyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 2048,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      if (mounted) {
+        setState(() {
+          _imageBytes = bytes;
+          _imageName = picked.name;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not pick image: $e');
+    }
+  }
+
+  String _contentType(String name) {
+    final n = name.toLowerCase();
+    if (n.endsWith('.png')) return 'image/png';
+    if (n.endsWith('.webp')) return 'image/webp';
+    if (n.endsWith('.gif')) return 'image/gif';
+    return 'image/jpeg';
+  }
+
+  // Picked filenames can contain spaces, parentheses, or unicode (e.g.
+  // "Screenshot (3).png"), which Supabase Storage rejects with "Invalid
+  // key". We only need the extension — the object base name is fixed.
+  String _safeExtension(String? name) {
+    final n = (name ?? '').toLowerCase();
+    for (final ext in const ['png', 'webp', 'gif', 'jpeg', 'jpg']) {
+      if (n.endsWith('.$ext')) return ext;
+    }
+    return 'jpg';
+  }
+
   Future<void> _submit() async {
     final body = _bodyController.text.trim();
-    if (body.isEmpty) {
-      setState(() => _error = 'Write something first.');
+    final image = _imageBytes;
+    // A post needs a body (text) or an image.
+    if (body.isEmpty && image == null) {
+      setState(() => _error = 'Write something or add a photo.');
       return;
     }
     setState(() {
       _busy = true;
       _error = null;
     });
+
+    final uid = supabase.auth.currentUser!.id;
+    final isImage = image != null;
+
     try {
-      // RLS "Members can create posts" checks author_user_id = auth.uid()
-      // and membership. author_alias is supplied by the client and locked
-      // immutable by trigger after insert. We don't chain .select() — SELECT
-      // on `posts` is revoked (feed is read via the view) — so we build the
-      // optimistic row locally for instant display; _loadPosts reconciles it.
-      await supabase.from('posts').insert({
-        'group_id': widget.groupId,
-        'author_user_id': supabase.auth.currentUser!.id,
-        'author_alias': widget.authorAlias,
-        'type': 'TEXT',
-        'body': body,
-      });
-      if (mounted) {
-        Navigator.of(context).pop(<String, dynamic>{
+      if (isImage) {
+        // Storage RLS gates upload on the post's group, resolved from the
+        // postId in the object path — so the post row must exist first, and
+        // the media_url CHECK requires a URL at insert time. We therefore
+        // generate the id client-side and set media_url to the path we're
+        // about to upload to, then upload the bytes.
+        final postId = const Uuid().v4();
+        final safeName = 'photo.${_safeExtension(_imageName)}';
+        final path = '$postId/$safeName';
+
+        await supabase.from('posts').insert({
+          'id': postId,
+          'group_id': widget.groupId,
+          'author_user_id': uid,
+          'author_alias': widget.authorAlias,
+          'type': 'IMAGE',
+          'media_url': path,
+          if (body.isNotEmpty) 'body': body,
+        });
+
+        await supabase.storage.from('post-media').uploadBinary(
+              path,
+              image,
+              fileOptions: FileOptions(contentType: _contentType(safeName)),
+            );
+
+        if (mounted) {
+          Navigator.of(context).pop(<String, dynamic>{
+            'id': postId,
+            'author_alias': widget.authorAlias,
+            'type': 'IMAGE',
+            'body': body,
+            'media_url': path,
+            'upvote_count': 0,
+          });
+        }
+      } else {
+        await supabase.from('posts').insert({
+          'group_id': widget.groupId,
+          'author_user_id': uid,
           'author_alias': widget.authorAlias,
           'type': 'TEXT',
           'body': body,
-          'upvote_count': 0,
         });
+        if (mounted) {
+          Navigator.of(context).pop(<String, dynamic>{
+            'author_alias': widget.authorAlias,
+            'type': 'TEXT',
+            'body': body,
+            'upvote_count': 0,
+          });
+        }
       }
     } on PostgrestException catch (e) {
       setState(() => _error = e.message);
+    } on StorageException catch (e) {
+      setState(() => _error = 'Upload failed: ${e.message}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -621,6 +780,7 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final image = _imageBytes;
     return Padding(
       padding: EdgeInsets.only(
         left: 16,
@@ -642,14 +802,48 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
             ],
           ),
           const SizedBox(height: 12),
+          if (image != null) ...[
+            Stack(
+              alignment: Alignment.topRight,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(image,
+                      height: 180,
+                      width: double.infinity,
+                      fit: BoxFit.cover),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: CircleAvatar(
+                    backgroundColor: Colors.black54,
+                    radius: 16,
+                    child: IconButton(
+                      icon: const Icon(Icons.close,
+                          size: 16, color: Colors.white),
+                      tooltip: 'Remove photo',
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() {
+                                _imageBytes = null;
+                                _imageName = null;
+                              }),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
           TextField(
             controller: _bodyController,
             autofocus: true,
             minLines: 3,
             maxLines: 6,
-            decoration: const InputDecoration(
-              hintText: "What's the tea? ☕️",
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              hintText:
+                  image == null ? "What's the tea? ☕️" : 'Add a caption…',
+              border: const OutlineInputBorder(),
             ),
           ),
           if (_error != null) ...[
@@ -657,20 +851,33 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
             Text(_error!, style: const TextStyle(color: Colors.red)),
           ],
           const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _busy ? null : _submit,
-            style: FilledButton.styleFrom(backgroundColor: _pink),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: _busy
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Text('Post'),
-            ),
+          Row(
+            children: [
+              IconButton(
+                onPressed: _busy ? null : _pickImage,
+                icon: const Icon(Icons.image_outlined),
+                color: _pink,
+                tooltip: 'Add photo',
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _busy ? null : _submit,
+                  style: FilledButton.styleFrom(backgroundColor: _pink),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: _busy
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Text('Post'),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
