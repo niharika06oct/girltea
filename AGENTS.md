@@ -41,7 +41,7 @@ for n in 001_enums 002_users 003_groups 004_group_memberships 005_group_invites 
   009_group_join_votes 010_posts 011_comments 012_reports 016_group_removal_requests \
   017_group_removal_votes 019_post_upvotes \
   013_indexes 014_triggers 020_alias_generator 015_approval_logic 018_removal_logic 021_hub_rpcs \
-  022_moderation 023_erasure; do
+  022_moderation 023_erasure 024_group_slugs; do
   psql "$DBURL" -v ON_ERROR_STOP=1 -f "schema/$n.sql"; done
 for f in supabase/auth_setup.sql supabase/auth_helpers.sql supabase/storage_buckets.sql \
   supabase/storage_policies.sql supabase/grants.sql supabase/rls_policies.sql; do

@@ -46,20 +46,26 @@ girltea/
 │   ├── 019_post_upvotes.sql           ← Upvote tracking
 │   ├── 020_alias_generator.sql        ← fn_generate_alias() for per-group aliases
 │   ├── 021_hub_rpcs.sql               ← Hub RPCs (create group, resolve invite, join, pending votes)
+│   ├── 022_moderation.sql             ← Moderation queue + actions
+│   ├── 023_erasure.sql                ← Right-to-erasure purge path (DPDP/GDPR)
+│   ├── 024_group_slugs.sql            ← Readable group slugs for URLs (/college-girls)
 │   ├── DESIGN.md                      ← Design decisions, flow diagrams, matrices
 │   ├── schema-diagram.png             ← ER diagram (high-res)
 │   ├── schema-diagram.svg             ← ER diagram (scalable)
 │   └── schema-diagram.mmd            ← ER diagram (editable Mermaid source)
-└── supabase/                          ← Supabase configuration
-    ├── config.toml                    ← Supabase CLI config for local dev stack
-    ├── auth_setup.sql                 ← Links app users to Supabase Auth
-    ├── auth_helpers.sql               ← Auth helper functions used by RLS/RPCs
-    ├── rls_policies.sql               ← Row Level Security for all 14 tables
-    ├── storage_buckets.sql            ← Storage bucket definitions
-    ├── storage_policies.sql           ← Storage access policies
-    ├── AUTH.md                        ← Auth setup guide + Flutter examples
-    ├── STORAGE.md                     ← Storage architecture + setup guide
-    └── QUERIES.md                     ← Complete query reference for Flutter app
+├── supabase/                          ← Supabase configuration
+│   ├── config.toml                    ← Supabase CLI config for local dev stack
+│   ├── auth_setup.sql                 ← Links app users to Supabase Auth
+│   ├── auth_helpers.sql               ← Auth helper functions used by RLS/RPCs
+│   ├── rls_policies.sql               ← Row Level Security for all 14 tables
+│   ├── storage_buckets.sql            ← Storage bucket definitions
+│   ├── storage_policies.sql           ← Storage access policies
+│   ├── AUTH.md                        ← Auth setup guide + Flutter examples
+│   ├── STORAGE.md                     ← Storage architecture + setup guide
+│   └── QUERIES.md                     ← Complete query reference for Flutter app
+├── app/                               ← Flutter web client (see app/README.md)
+└── scripts/
+    └── dev-code.sh                    ← Prints an instant sign-in OTP for local dev
 ```
 
 ## Schema Diagram
@@ -166,8 +172,13 @@ Phone/email OTP via **Supabase Auth** — no passwords, no social login.
 ```
 Enter phone/email → receive 6-digit OTP → verify
   → No profile? → Onboarding screen (name, DOB, gender, employment)
-  → Has profile? → Group hub
+  → Has profile? → Circles overview (/home)
 ```
+
+The web client uses real, shareable URLs (via `go_router`): `/home` (your
+circles), `/:group-slug` (a circle's feed), and `/:group-slug/:postId` (a single
+post + its tea). Group slugs are readable and derived from the group name by
+`024_group_slugs.sql`.
 
 - `users.id` = `auth.users.id` (same UUID, linked via FK)
 - Profile created at onboarding, not automatically on signup (keeps NOT NULL
@@ -253,7 +264,7 @@ then indexes/triggers/functions:
    `017_group_removal_votes`, `019_post_upvotes`
 2. Indexes & triggers: `013_indexes`, `014_triggers`
 3. Functions & RPCs: `020_alias_generator`, `015_approval_logic`, `018_removal_logic`,
-   `021_hub_rpcs`
+   `021_hub_rpcs`, `022_moderation`, `023_erasure`, `024_group_slugs`
 
 If you have the Supabase CLI and `psql` locally, the loop in `AGENTS.md` applies
 everything in the correct order in one step.

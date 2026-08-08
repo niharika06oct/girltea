@@ -1,0 +1,5 @@
+# macOS
+.DS_Store
+
+# Stray screenshots dropped in the repo root during development
+/Screenshot*.png
