@@ -41,6 +41,7 @@ dependencies:
   just_audio: ^0.10.6
   video_player: ^2.13.0
   http: ^1.6.0
+  go_router: ^14.6.2
 
 dev_dependencies:
   flutter_test:
