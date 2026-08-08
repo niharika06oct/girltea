@@ -31,6 +31,8 @@ CREATE TABLE groups (
         "allowInviteLink": true,
         "removalQuorum": 2,
         "removalRequestTtlHours": 168,
+        "removalCooldownHours": 72,
+        "maxOpenRemovalRequestsPerRequester": 3,
         "democraticThreshold": 10
     }'::jsonb,
 

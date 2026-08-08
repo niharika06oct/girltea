@@ -29,6 +29,7 @@ ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE post_upvotes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE report_actions ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================
 -- USERS
@@ -316,17 +317,41 @@ USING (user_id = auth.uid());
 -- REPORTS
 -- ============================================================
 
+-- Reporters file through fn_submit_report (DEFINER), which snapshots
+-- evidence. This RLS is the safety net for direct INSERT attempts:
+-- a client may only file as itself, and only PENDING (can't backdate
+-- a status or self-assign).
 CREATE POLICY "Authenticated users can create reports"
 ON reports FOR INSERT TO authenticated
-WITH CHECK (reporter_user_id = auth.uid());
+WITH CHECK (
+    reporter_user_id = auth.uid()
+    AND status = 'PENDING'
+    AND assigned_to_user_id IS NULL
+    AND resolved_at IS NULL
+);
 
 CREATE POLICY "Users can see their own reports"
 ON reports FOR SELECT TO authenticated
 USING (reporter_user_id = auth.uid());
 
--- FIX gap: moderator path (TODO: add moderator role or admin table)
--- For now, service_role can read all reports via Supabase dashboard
--- or Edge Functions.
+-- Moderation (triage, assign, action, dismiss) runs through
+-- SECURITY DEFINER RPCs in 022_moderation.sql, which enforce the
+-- moderator role. No direct UPDATE policy — reporters cannot mutate
+-- their report's status, and non-moderators cannot touch others'.
+-- service_role retains full access for dashboard/Edge Function use.
+
+-- ---- Report actions (audit log) ----
+-- Append-only, written only by DEFINER moderation RPCs. Reporters may
+-- read the action trail on their own reports for transparency.
+CREATE POLICY "Reporters can read actions on their own reports"
+ON report_actions FOR SELECT TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM reports r
+        WHERE r.id = report_actions.report_id
+          AND r.reporter_user_id = auth.uid()
+    )
+);
 
 -- ============================================================
 -- ANONYMITY: Views + privilege revocation

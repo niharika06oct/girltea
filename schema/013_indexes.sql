@@ -98,5 +98,17 @@ CREATE INDEX idx_removal_votes_request ON group_removal_votes (removal_request_i
 
 -- ---- Reports ----
 CREATE INDEX idx_reports_target ON reports (target_type, target_id);
-CREATE INDEX idx_reports_unresolved ON reports (created_at)
-    WHERE resolved = FALSE;
+
+-- Moderation queue: open reports, oldest first (triage order).
+CREATE INDEX idx_reports_open ON reports (created_at)
+    WHERE status IN ('PENDING', 'UNDER_REVIEW');
+
+-- Per-group moderation queue.
+CREATE INDEX idx_reports_group_status ON reports (group_id, status, created_at);
+
+-- A moderator's assigned workload.
+CREATE INDEX idx_reports_assigned ON reports (assigned_to_user_id, status)
+    WHERE assigned_to_user_id IS NOT NULL;
+
+-- ---- Report Actions ----
+CREATE INDEX idx_report_actions_report ON report_actions (report_id, created_at);

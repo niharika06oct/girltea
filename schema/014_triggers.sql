@@ -74,6 +74,10 @@ CREATE TRIGGER trg_entry_questions_updated_at
 BEFORE UPDATE ON group_entry_questions
 FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
+CREATE TRIGGER trg_reports_updated_at
+BEFORE UPDATE ON reports
+FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
 
 -- ---- Column-lock: reject changes to immutable fields on posts ----
 -- FIX #3: Without this, an author can rewrite author_alias to

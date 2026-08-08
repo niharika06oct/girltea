@@ -11,6 +11,15 @@ CREATE TABLE group_memberships (
 
     alias       TEXT NOT NULL,
 
+    -- Gender snapshotted at admission time from users.gender. The
+    -- gender-policy guarantee (e.g. WOMEN_ONLY) is evaluated once, when
+    -- the member is admitted, and frozen here. Reading users.gender live
+    -- would let a later profile edit silently break the guarantee — an
+    -- admitted member editing their gender does NOT retroactively
+    -- invalidate their membership, and cannot be used to sneak into a
+    -- room they wouldn't qualify for today. NULL for pre-existing rows.
+    gender_at_admission gender,
+
     joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 

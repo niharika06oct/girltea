@@ -162,6 +162,10 @@ DECLARE
     v_member_count INT;
     v_quorum INT;
     v_eligible_voters INT;
+    v_cooldown_hours INT;
+    v_max_open INT;
+    v_open_by_requester INT;
+    v_last_resolved TIMESTAMPTZ;
 BEGIN
     IF v_caller IS NULL THEN
         RAISE EXCEPTION 'Not authenticated';
@@ -203,6 +207,43 @@ BEGIN
     -- FIX #4: Block OWNER removal
     IF v_target_role = 'OWNER' THEN
         RAISE EXCEPTION 'Cannot remove the group owner. Ownership must be transferred first.';
+    END IF;
+
+    -- Abuse guard: cooldown per target. After a removal request against
+    -- this member is resolved (rejected/expired/cancelled), it can't be
+    -- re-raised for removalCooldownHours. Stops one member from grinding
+    -- the same person down with repeated votes. (An APPROVED removal bans
+    -- the target, so status wouldn't be ACTIVE and we'd never get here.)
+    v_cooldown_hours := COALESCE((v_settings->>'removalCooldownHours')::INT, 72);
+    IF v_cooldown_hours > 0 THEN
+        SELECT MAX(rr.resolved_at) INTO v_last_resolved
+        FROM group_removal_requests rr
+        WHERE rr.group_id = p_group_id
+          AND rr.target_user_id = v_target_user_id
+          AND rr.status IN ('REJECTED', 'EXPIRED', 'CANCELLED')
+          AND rr.resolved_at IS NOT NULL;
+
+        IF v_last_resolved IS NOT NULL
+           AND v_last_resolved > now() - (v_cooldown_hours || ' hours')::INTERVAL THEN
+            RAISE EXCEPTION 'A removal request against this member was recently resolved. '
+                'Please wait % hours before raising another.', v_cooldown_hours;
+        END IF;
+    END IF;
+
+    -- Abuse guard: cap on open (pending) requests raised by one member,
+    -- so a single member can't flood the group with removal requests.
+    v_max_open := COALESCE((v_settings->>'maxOpenRemovalRequestsPerRequester')::INT, 3);
+    IF v_max_open > 0 THEN
+        SELECT COUNT(*) INTO v_open_by_requester
+        FROM group_removal_requests rr
+        WHERE rr.group_id = p_group_id
+          AND rr.requested_by_user_id = v_caller
+          AND rr.status = 'PENDING';
+
+        IF v_open_by_requester >= v_max_open THEN
+            RAISE EXCEPTION 'You already have % open removal requests in this group. '
+                'Resolve those before raising another.', v_open_by_requester;
+        END IF;
     END IF;
 
     -- FIX #7: Check if removal is even possible given member count

@@ -89,3 +89,41 @@ CREATE TYPE report_target_type AS ENUM (
     'USER',
     'GROUP'
 );
+
+-- Why the content was reported. Drives triage priority and, under
+-- India's IT Rules, the takedown-timeline bucket a report falls into.
+CREATE TYPE report_reason AS ENUM (
+    'SPAM',
+    'HARASSMENT',
+    'HATE_SPEECH',
+    'VIOLENCE_OR_THREAT',
+    'SEXUAL_CONTENT',
+    'CSAM',                  -- child sexual abuse material (highest priority)
+    'NON_CONSENSUAL_IMAGERY',
+    'SELF_HARM',
+    'MISINFORMATION',
+    'PRIVACY_VIOLATION',     -- doxxing, sharing someone's private info
+    'IMPERSONATION',
+    'DEFAMATION',
+    'OTHER'
+);
+
+-- Lifecycle of a report through moderation.
+CREATE TYPE report_status AS ENUM (
+    'PENDING',        -- newly filed, not yet triaged
+    'UNDER_REVIEW',   -- a moderator has picked it up
+    'ACTIONED',       -- content/user was acted on
+    'DISMISSED'       -- reviewed, no action warranted
+);
+
+-- What a moderator did — recorded in the action log for an audit trail.
+CREATE TYPE moderation_action AS ENUM (
+    'ASSIGNED',
+    'CONTENT_REMOVED',
+    'CONTENT_KEPT',
+    'USER_WARNED',
+    'USER_BANNED',
+    'ESCALATED',
+    'DISMISSED',
+    'NOTE'
+);

@@ -34,6 +34,7 @@ DECLARE
     v_current_rejections INT;
     v_invite_rows INT;
     v_membership_rows INT;
+    v_requester_gender gender;
 BEGIN
     IF p_voter_user_id IS NULL THEN
         RAISE EXCEPTION 'Not authenticated';
@@ -158,10 +159,17 @@ BEGIN
         SET status = 'APPROVED', resolved_at = now()
         WHERE id = p_join_request_id;
 
-        INSERT INTO group_memberships (group_id, user_id, role, status, alias)
-        VALUES (v_group_id, v_requester_id, 'MEMBER', 'ACTIVE', fn_generate_alias_for_group(v_group_id))
+        -- Snapshot the requester's gender AS OF admission. This freezes
+        -- the gender-policy guarantee onto the membership row so a later
+        -- profile edit can't silently break it (see 004_group_memberships).
+        SELECT u.gender INTO v_requester_gender
+        FROM users u WHERE u.id = v_requester_id;
+
+        INSERT INTO group_memberships (group_id, user_id, role, status, alias, gender_at_admission)
+        VALUES (v_group_id, v_requester_id, 'MEMBER', 'ACTIVE', fn_generate_alias_for_group(v_group_id), v_requester_gender)
         ON CONFLICT (group_id, user_id) DO UPDATE
-            SET status = 'ACTIVE', joined_at = now(), updated_at = now()
+            SET status = 'ACTIVE', joined_at = now(), updated_at = now(),
+                gender_at_admission = EXCLUDED.gender_at_admission
             WHERE group_memberships.status = 'LEFT';
 
         -- Check if membership was actually created/updated
