@@ -56,8 +56,9 @@ BEGIN
     VALUES (p_name, p_description, p_policy, p_visibility, p_category_tags, v_caller)
     RETURNING id INTO v_group_id;
 
-    INSERT INTO group_memberships (group_id, user_id, role, status, alias)
-    VALUES (v_group_id, v_caller, 'OWNER', 'ACTIVE', fn_generate_alias_for_group(v_group_id));
+    -- Snapshot the owner's gender AS OF creation (see 004_group_memberships).
+    INSERT INTO group_memberships (group_id, user_id, role, status, alias, gender_at_admission)
+    VALUES (v_group_id, v_caller, 'OWNER', 'ACTIVE', fn_generate_alias_for_group(v_group_id), v_user_gender);
 
     RETURN v_group_id;
 END;
