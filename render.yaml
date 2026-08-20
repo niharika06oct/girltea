@@ -1,0 +1,24 @@
+# Render blueprint for the GirlTea Flutter web app.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> connect this repo. Render reads
+# this file, builds the Docker image (Flutter web build -> Node static server),
+# and serves it over HTTPS. Pushes to the tracked branch auto-redeploy.
+#
+# The two SUPABASE_* vars are public client values (project URL + publishable
+# key), so they live here in plain text and are passed to the Docker build as
+# build args (the Dockerfile declares matching ARGs). No secrets are committed.
+services:
+  - type: web
+    name: girltea
+    runtime: docker
+    repo: https://github.com/niharika06oct/girltea
+    dockerfilePath: ./app/Dockerfile
+    dockerContext: ./app
+    plan: free
+    region: singapore
+    autoDeploy: true
+    envVars:
+      - key: SUPABASE_URL
+        value: https://uicdlhczntenjhtfijhr.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: sb_publishable_uQJmo6mkQnnKl4dXdsuArA_yXvZMzvt

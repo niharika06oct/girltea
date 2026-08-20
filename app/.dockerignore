@@ -1,0 +1,10 @@
+# Build artifacts and local tooling — rebuilt inside the image.
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.idea/
+*.iml
+node_modules/
+.DS_Store
