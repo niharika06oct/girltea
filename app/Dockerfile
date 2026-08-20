@@ -2,7 +2,7 @@
 
 # ---- Build stage: compile the Flutter web app ----
 # Pinned to the Flutter version used in development (see `flutter --version`).
-FROM ghcr.io/cirruslabs/flutter:3.44.8 AS build
+FROM ghcr.io/cirruslabs/flutter:3.44.0 AS build
 
 WORKDIR /app
 
