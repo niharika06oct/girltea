@@ -3,3 +3,7 @@
 
 # Stray screenshots dropped in the repo root during development
 /Screenshot*.png
+
+# Local secrets (service_role key for scripts/cloud-code.sh) — never commit
+scripts/.env
+.env

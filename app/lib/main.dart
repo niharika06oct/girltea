@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart' hide Config;
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:just_audio/just_audio.dart';
@@ -25,7 +26,55 @@ Future<void> main() async {
 
 final supabase = Supabase.instance.client;
 
-const _pink = Color(0xFFD6336C);
+// ------------------------------------------------------------
+// Brand palette — from the "Visual Style" spec in the mockup:
+// warm · friendly · safe · feminine · minimal · intimate.
+// ------------------------------------------------------------
+const _pink = Color(0xFFE35B85); // primary rose — CTAs & active accents
+const _plum = Color(0xFF7A2E44); // deep plum — the Playfair wordmark
+const _lavender = Color(0xFFB7A4DB); // soft lavender — secondary accent
+const _cream = Color(0xFFF7E9DC); // warm peach surface
+const _bg = Color(0xFFFCF8F5); // warm off-white app background
+const _hairline = Color(0xFFEDE3E8); // subtle card/divider border
+
+/// Poppins SemiBold — the mockup's header face. Wraps [GoogleFonts.poppins]
+/// so header call-sites stay short.
+TextStyle _headerFont({
+  required double size,
+  Color? color,
+  FontWeight weight = FontWeight.w600,
+}) =>
+    GoogleFonts.poppins(fontSize: size, color: color, fontWeight: weight);
+
+/// The GirlTea wordmark in Playfair Display (the mockup's "Accents" face),
+/// with the little teacup. Used on the login screen and the top bar.
+class GirlTeaWordmark extends StatelessWidget {
+  const GirlTeaWordmark({super.key, this.fontSize = 22, this.center = false});
+
+  final double fontSize;
+  final bool center;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment:
+          center ? MainAxisAlignment.center : MainAxisAlignment.start,
+      children: [
+        Text(
+          'GirlTea',
+          style: GoogleFonts.playfairDisplay(
+            fontSize: fontSize,
+            fontWeight: FontWeight.w700,
+            color: _plum,
+          ),
+        ),
+        SizedBox(width: fontSize * 0.35),
+        Text('🍵', style: TextStyle(fontSize: fontSize * 0.9)),
+      ],
+    );
+  }
+}
 
 // ============================================================
 // Theme controller — "Display Mode" (light / dark / system)
@@ -100,6 +149,13 @@ class GroupsController extends ChangeNotifier {
   List<Map<String, dynamic>>? groups; // null = not loaded yet
   Object? error;
   String? displayName;
+  String? gender; // the caller's stored gender enum, null = prefer not to say
+
+  /// Whether we've resolved the caller's profile row yet, and whether it
+  /// exists. A signed-in user has an auth account but no `users` row until
+  /// they complete onboarding — and creating/joining circles requires one.
+  bool profileLoaded = false;
+  bool hasProfile = false;
 
   bool _loading = false;
 
@@ -132,10 +188,16 @@ class GroupsController extends ChangeNotifier {
       final rows = await supabase.rpc('fn_my_profile');
       if (rows is List && rows.isNotEmpty) {
         displayName = rows.first['display_name'] as String?;
-        notifyListeners();
+        gender = rows.first['gender'] as String?;
+        hasProfile = true;
+      } else {
+        hasProfile = false;
       }
     } catch (_) {
       // Non-fatal.
+    } finally {
+      profileLoaded = true;
+      notifyListeners();
     }
   }
 
@@ -144,6 +206,9 @@ class GroupsController extends ChangeNotifier {
     groups = null;
     error = null;
     displayName = null;
+    gender = null;
+    profileLoaded = false;
+    hasProfile = false;
     notifyListeners();
   }
 
@@ -621,6 +686,51 @@ class _SignedAudioState extends State<SignedAudio> {
   }
 }
 
+/// Builds the app theme for a brightness: Inter body (Google Fonts), Poppins
+/// headers, the warm rose/cream palette, and softened card/input chrome so the
+/// whole app reads "warm · minimal · intimate" per the mockup.
+ThemeData _buildTheme(Brightness brightness) {
+  final isLight = brightness == Brightness.light;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: _pink,
+    brightness: brightness,
+    primary: _pink,
+    secondary: _lavender,
+  );
+  final base = ThemeData(colorScheme: scheme, useMaterial3: true);
+  final textTheme = GoogleFonts.interTextTheme(base.textTheme).copyWith(
+    headlineLarge: GoogleFonts.poppins(
+        textStyle: base.textTheme.headlineLarge, fontWeight: FontWeight.w600),
+    headlineMedium: GoogleFonts.poppins(
+        textStyle: base.textTheme.headlineMedium, fontWeight: FontWeight.w600),
+    headlineSmall: GoogleFonts.poppins(
+        textStyle: base.textTheme.headlineSmall, fontWeight: FontWeight.w600),
+    titleLarge: GoogleFonts.poppins(
+        textStyle: base.textTheme.titleLarge, fontWeight: FontWeight.w600),
+  );
+  return base.copyWith(
+    scaffoldBackgroundColor: isLight ? _bg : null,
+    textTheme: textTheme,
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+        textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _hairline),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _pink, width: 1.6),
+      ),
+    ),
+  );
+}
+
 class GirlTeaApp extends StatelessWidget {
   const GirlTeaApp({super.key});
 
@@ -632,20 +742,8 @@ class GirlTeaApp extends StatelessWidget {
       builder: (context, _) => MaterialApp.router(
         title: 'GirlTea',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: _pink,
-            brightness: Brightness.light,
-          ),
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: _pink,
-            brightness: Brightness.dark,
-          ),
-          useMaterial3: true,
-        ),
+        theme: _buildTheme(Brightness.light),
+        darkTheme: _buildTheme(Brightness.dark),
         themeMode: themeController.mode,
         routerConfig: _router,
         // Shared groups cache lives above every route so the shell and panes
@@ -800,23 +898,15 @@ class _LoginScreenState extends State<LoginScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('🍵',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 56)),
+                const GirlTeaWordmark(fontSize: 40, center: true),
                 const SizedBox(height: 8),
-                Text(
-                  'GirlTea',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineMedium
-                      ?.copyWith(color: _pink, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
                 Text(
                   'Vent. Support. Spill the tea.',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: Colors.black54),
                 ),
                 const SizedBox(height: 32),
                 TextField(
@@ -834,7 +924,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _otpController,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
-                      labelText: '6-digit code (check Mailpit :54324)',
+                      labelText: 'Enter your login code',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -1006,17 +1096,7 @@ class _TopBar extends StatelessWidget implements PreferredSizeWidget {
             onTap: () => context.go('/home'),
             child: const Padding(
               padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: Row(
-                children: [
-                  Text('🍵', style: TextStyle(fontSize: 22)),
-                  SizedBox(width: 8),
-                  Text('GirlTea',
-                      style: TextStyle(
-                          color: _pink,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold)),
-                ],
-              ),
+              child: GirlTeaWordmark(fontSize: 22),
             ),
           ),
           // Centered Spill.
@@ -1187,6 +1267,15 @@ class _OverviewPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final gc = GroupsScope.of(context);
+    // Wait until we know whether the caller has a profile before deciding what
+    // to show — otherwise onboarding would flash for existing users.
+    if (!gc.profileLoaded) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    // A signed-in user with no `users` row can't create or join circles yet.
+    if (!gc.hasProfile) {
+      return const _OnboardingPane();
+    }
     return _CirclesOverview(
       groups: gc.groups,
       error: gc.error,
@@ -1442,9 +1531,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name,
-                          style: const TextStyle(
-                              fontSize: 24, fontWeight: FontWeight.bold)),
+                      Text(name, style: _headerFont(size: 24)),
                       if (email.isNotEmpty)
                         Text(email,
                             style: const TextStyle(color: Colors.black54)),
@@ -1460,6 +1547,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: TextStyle(color: Colors.black54, height: 1.3),
             ),
             const SizedBox(height: 24),
+            _infoRow(
+              icon: Icons.wc_outlined,
+              label: 'Gender',
+              value: _genderLabel(p['gender'] as String?),
+            ),
+            if ((p['date_of_birth'] as String?) != null)
+              _infoRow(
+                icon: Icons.cake_outlined,
+                label: 'Date of birth',
+                value: (p['date_of_birth'] as String).split('T').first,
+              ),
+            const SizedBox(height: 12),
             _profileTile(
               icon: Icons.brightness_6_outlined,
               title: 'Display Mode',
@@ -1492,6 +1591,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ThemeMode.system => 'System',
       };
 
+  /// Friendly label for a stored gender enum. Falls back to a title-cased
+  /// version of the raw enum for values not in [_genderOptions], and shows
+  /// "Prefer not to say" when it's null.
+  static String _genderLabel(String? g) {
+    if (g == null) return 'Prefer not to say';
+    final known = _genderOptions[g];
+    if (known != null) return known;
+    return g
+        .toLowerCase()
+        .split('_')
+        .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
+  }
+
+  /// A read-only "label: value" row for profile facts (gender, DOB).
+  Widget _infoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.black45),
+          const SizedBox(width: 16),
+          Text(label,
+              style: const TextStyle(color: Colors.black54)),
+          const Spacer(),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
   Widget _profileTile({
     required IconData icon,
     required String title,
@@ -1505,6 +1639,375 @@ class _ProfileScreenState extends State<ProfileScreen> {
       title: Text(title, style: TextStyle(color: color)),
       subtitle: subtitle == null ? null : Text(subtitle),
       onTap: onTap,
+    );
+  }
+}
+
+// ============================================================
+// Onboarding — create the caller's profile row
+// ============================================================
+// The gender values the DB enum accepts, mapped to friendly labels. We surface
+// a short list here (null = "Prefer not to say", stored as NULL); the full enum
+// has more variants but this keeps first-run frictionless.
+const Map<String?, String> _genderOptions = {
+  'WOMAN': 'Woman',
+  'MAN': 'Man',
+  'NON_BINARY': 'Non-binary',
+  null: 'Prefer not to say',
+};
+
+/// Shown on /home when the signed-in user has an auth account but no `users`
+/// row yet. Collects the minimum the schema requires (display name + DOB, both
+/// NOT NULL; gender optional) and inserts the profile, then refreshes so the
+/// real landing renders.
+class _OnboardingPane extends StatefulWidget {
+  const _OnboardingPane();
+
+  @override
+  State<_OnboardingPane> createState() => _OnboardingPaneState();
+}
+
+class _OnboardingPaneState extends State<_OnboardingPane> {
+  final _name = TextEditingController();
+  String? _gender; // null = prefer not to say
+  DateTime? _dob;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    // Must be at least 13 (DB CHECK). Default the picker near a plausible adult
+    // birth year so it's a short scroll either way.
+    final maxDob = DateTime(now.year - 13, now.month, now.day);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dob ?? DateTime(now.year - 20, now.month, now.day),
+      firstDate: DateTime(1920),
+      lastDate: maxDob,
+      helpText: 'Your date of birth',
+    );
+    if (picked != null) setState(() => _dob = picked);
+  }
+
+  Future<void> _submit() async {
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Pick a display name.');
+      return;
+    }
+    if (_dob == null) {
+      setState(() => _error = 'Add your date of birth.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final uid = supabase.auth.currentUser!.id;
+      final dob = '${_dob!.year.toString().padLeft(4, '0')}-'
+          '${_dob!.month.toString().padLeft(2, '0')}-'
+          '${_dob!.day.toString().padLeft(2, '0')}';
+      await supabase.from('users').insert({
+        'id': uid,
+        'auth_subject': uid,
+        'display_name': name,
+        'date_of_birth': dob,
+        if (_gender != null) 'gender': _gender,
+      });
+      await groupsController.refresh();
+      // refresh() flips hasProfile → the parent rebuilds into _CirclesOverview.
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = '$e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.all(32),
+          children: [
+            const Text('🌸', style: TextStyle(fontSize: 44)),
+            const SizedBox(height: 12),
+            Text('Welcome to GirlTea', style: _headerFont(size: 26)),
+            const SizedBox(height: 6),
+            const Text(
+              "Let's set up your profile. This is how you'll show up inside "
+              'your circles.',
+              style: TextStyle(color: Colors.black54, fontSize: 15, height: 1.4),
+            ),
+            const SizedBox(height: 28),
+            TextField(
+              controller: _name,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Display name',
+                hintText: 'e.g. Diya',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String?>(
+              initialValue: _gender,
+              decoration: const InputDecoration(
+                labelText: 'Gender',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                for (final e in _genderOptions.entries)
+                  DropdownMenuItem<String?>(value: e.key, child: Text(e.value)),
+              ],
+              onChanged: (v) => setState(() => _gender = v),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _pickDob,
+              icon: const Icon(Icons.cake_outlined),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                alignment: Alignment.centerLeft,
+              ),
+              label: Text(
+                _dob == null
+                    ? 'Date of birth'
+                    : 'Born ${_dob!.year}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.day.toString().padLeft(2, '0')}',
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 16),
+              Text(_error!, style: const TextStyle(color: _pink)),
+            ],
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _saving ? null : _submit,
+              style: FilledButton.styleFrom(
+                backgroundColor: _pink,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: _saving
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// Create circle — sheet + flow helper
+// ============================================================
+// group_policy values the backend accepts, with a short "who's this for" hint.
+const Map<String, ({String label, String hint})> _policyOptions = {
+  'GENDER_NEUTRAL': (label: 'Gender-neutral', hint: 'Anyone can join'),
+  'WOMEN_ONLY': (label: 'Women only', hint: 'Only women can join'),
+  'MIXED': (label: 'Mixed', hint: 'Open to all genders'),
+};
+
+/// The policies a caller with [gender] is allowed to create, mirroring the
+/// backend check in `fn_create_group_with_owner`: GENDER_NEUTRAL is always
+/// allowed; MIXED needs any gender set; WOMEN_ONLY needs gender = WOMAN. We
+/// filter the picker to these so nobody can pick an option that would only
+/// come back as a server error.
+List<String> _policiesForGender(String? gender) {
+  return [
+    'GENDER_NEUTRAL',
+    if (gender != null) 'MIXED',
+    if (gender == 'WOMAN') 'WOMEN_ONLY',
+  ];
+}
+
+/// Opens the create-circle sheet, then (on success) refreshes the groups cache
+/// and navigates into the brand-new circle's feed. Guards on having a profile —
+/// the backend RPC would reject a callerless request anyway, but this gives a
+/// friendlier path. Safe to call from the rail, the overview, or the empty state.
+Future<void> startCreateCircle(BuildContext context) async {
+  if (!groupsController.hasProfile) return;
+  final newId = await showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => const _CreateCircleSheet(),
+  );
+  if (newId == null) return;
+  await groupsController.refresh();
+  final created = groupsController.groups?.firstWhere(
+    (g) => g['id'] == newId,
+    orElse: () => <String, dynamic>{},
+  );
+  final slug = created?['slug'] as String?;
+  if (slug != null && context.mounted) context.go('/$slug');
+}
+
+class _CreateCircleSheet extends StatefulWidget {
+  const _CreateCircleSheet();
+
+  @override
+  State<_CreateCircleSheet> createState() => _CreateCircleSheetState();
+}
+
+class _CreateCircleSheetState extends State<_CreateCircleSheet> {
+  final _name = TextEditingController();
+  final _desc = TextEditingController();
+  String _policy = 'GENDER_NEUTRAL';
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _desc.dispose();
+    super.dispose();
+  }
+
+  Future<void> _create() async {
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Give your circle a name.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final id = await supabase.rpc('fn_create_group_with_owner', params: {
+        'p_name': name,
+        'p_description': _desc.text.trim().isEmpty ? null : _desc.text.trim(),
+        'p_policy': _policy,
+        'p_visibility': 'LINK_ONLY',
+        'p_category_tags': <String>[],
+      });
+      if (mounted) Navigator.of(context).pop(id as String);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = '$e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 20,
+        bottom: 24 + bottomInset,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text('Create a circle', style: _headerFont(size: 22)),
+            const SizedBox(height: 4),
+            const Text(
+              'A private space for your people. Invite them with a link once '
+              "it's made.",
+              style: TextStyle(color: Colors.black54, height: 1.4),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _name,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Circle name',
+                hintText: 'e.g. The Group Chat',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _desc,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Description (optional)',
+                hintText: "What's this circle about?",
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text('Who can join',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            for (final key in _policiesForGender(groupsController.gender))
+              RadioListTile<String>(
+                value: key,
+                groupValue: _policy,
+                onChanged: (v) => setState(() => _policy = v!),
+                activeColor: _pink,
+                contentPadding: EdgeInsets.zero,
+                title: Text(_policyOptions[key]!.label),
+                subtitle: Text(_policyOptions[key]!.hint),
+              ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: _pink)),
+            ],
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _saving ? null : _create,
+                style: FilledButton.styleFrom(
+                  backgroundColor: _pink,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: _saving
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Create circle'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1536,54 +2039,394 @@ class _CirclesOverview extends StatelessWidget {
     if (list == null) {
       return const Center(child: CircularProgressIndicator());
     }
+    if (list.isEmpty) {
+      return _EmptyCirclesState(displayName: displayName);
+    }
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760),
         child: ListView(
           padding: const EdgeInsets.all(32),
           children: [
-            Text(
-              displayName == null ? 'Your circles' : 'Hi, $displayName 👋',
-              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'The people who know you. Pick a circle to catch up on the tea.',
-              style: TextStyle(color: Colors.black54, fontSize: 15),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayName == null
+                            ? 'Your circles'
+                            : 'Hi, $displayName 👋',
+                        style: _headerFont(size: 26),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'The people who know you. Pick a circle to catch up '
+                        'on the tea.',
+                        style: TextStyle(color: Colors.black54, fontSize: 15),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                FilledButton.icon(
+                  onPressed: () => startCreateCircle(context),
+                  icon: const Icon(Icons.add),
+                  label: const Text('New Circle'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _pink,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 14),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 24),
-            if (list.isEmpty)
+            LayoutBuilder(
+              builder: (context, c) {
+                // 2 columns when there's room, otherwise 1.
+                final cols = c.maxWidth >= 520 ? 2 : 1;
+                final cardWidth =
+                    cols == 2 ? (c.maxWidth - 16) / 2 : c.maxWidth;
+                return Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  children: [
+                    for (final g in list)
+                      SizedBox(
+                        width: cardWidth,
+                        child: _CircleOverviewCard(
+                          group: g,
+                          onOpen: () => onOpen(g['slug'] as String),
+                        ),
+                      ),
+                    SizedBox(
+                      width: cardWidth,
+                      child: _CreateCircleCard(
+                        onTap: () => startCreateCircle(context),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 36),
+            Text('Recent Spills', style: _headerFont(size: 20)),
+            const SizedBox(height: 12),
+            _RecentSpills(groups: list, onOpen: onOpen),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A cross-circle feed of the latest posts, with filter chips (All Circles +
+/// one per circle). Reads the `posts_feed` view, which already scopes rows to
+/// the caller's groups, so a single query covers every circle at once. Tapping
+/// a spill opens that post in its circle.
+class _RecentSpills extends StatefulWidget {
+  const _RecentSpills({required this.groups, required this.onOpen});
+
+  final List<Map<String, dynamic>> groups;
+  final ValueChanged<String> onOpen; // receives a circle slug
+
+  @override
+  State<_RecentSpills> createState() => _RecentSpillsState();
+}
+
+class _RecentSpillsState extends State<_RecentSpills> {
+  late Future<List<Map<String, dynamic>>> _future;
+  String? _filterGroupId; // null = All Circles
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<List<Map<String, dynamic>>> _load() async {
+    final rows = await supabase
+        .from('posts_feed')
+        .select(
+            'id, group_id, author_alias, type, body, thumbnail_url, upvote_count, created_at')
+        .order('created_at', ascending: false)
+        .limit(30);
+    return (rows as List).cast<Map<String, dynamic>>();
+  }
+
+  String _groupName(String id) {
+    for (final g in widget.groups) {
+      if (g['id'] == id) return (g['name'] as String?) ?? 'Circle';
+    }
+    return 'Circle';
+  }
+
+  String? _groupSlug(String id) {
+    for (final g in widget.groups) {
+      if (g['id'] == id) return g['slug'] as String?;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _future,
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final all = snap.data ?? const [];
+        final posts = _filterGroupId == null
+            ? all
+            : all.where((p) => p['group_id'] == _filterGroupId).toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Filter chips.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _chip('All Circles', _filterGroupId == null,
+                    () => setState(() => _filterGroupId = null)),
+                for (final g in widget.groups)
+                  _chip(
+                    (g['name'] as String?) ?? 'Circle',
+                    _filterGroupId == g['id'],
+                    () => setState(() => _filterGroupId = g['id'] as String),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (posts.isEmpty)
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 40),
-                child: Center(
-                  child: Text('You are not in any circles yet.',
-                      style: TextStyle(color: Colors.black45)),
-                ),
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('No spills yet. Be the first to share something.',
+                    style: TextStyle(color: Colors.black45)),
               )
             else
-              LayoutBuilder(
-                builder: (context, c) {
-                  // 2 columns when there's room, otherwise 1.
-                  final cols = c.maxWidth >= 520 ? 2 : 1;
-                  return Wrap(
-                    spacing: 16,
-                    runSpacing: 16,
-                    children: [
-                      for (final g in list)
-                        SizedBox(
-                          width: cols == 2
-                              ? (c.maxWidth - 16) / 2
-                              : c.maxWidth,
-                          child: _CircleOverviewCard(
-                            group: g,
-                            onOpen: () => onOpen(g['slug'] as String),
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
+              for (final p in posts)
+                _SpillTile(
+                  post: p,
+                  circleName: _groupName(p['group_id'] as String),
+                  onTap: () {
+                    final slug = _groupSlug(p['group_id'] as String);
+                    if (slug != null) widget.onOpen(slug);
+                  },
+                ),
           ],
+        );
+      },
+    );
+  }
+
+  Widget _chip(String label, bool active, VoidCallback onTap) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: active,
+      onSelected: (_) => onTap(),
+      showCheckmark: false,
+      selectedColor: _pink,
+      backgroundColor: Colors.white,
+      labelStyle: TextStyle(
+        color: active ? Colors.white : Colors.black87,
+        fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+      ),
+      shape: StadiumBorder(
+        side: BorderSide(color: active ? _pink : _hairline),
+      ),
+    );
+  }
+}
+
+/// One row in the Recent Spills feed: circle name + alias + time, a snippet or
+/// media hint, and the upvote count.
+class _SpillTile extends StatelessWidget {
+  const _SpillTile({
+    required this.post,
+    required this.circleName,
+    required this.onTap,
+  });
+
+  final Map<String, dynamic> post;
+  final String circleName;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = (post['type'] as String?) ?? 'TEXT';
+    final body = (post['body'] as String?)?.trim();
+    final snippet = switch (type) {
+      'VIDEO' => '📹 Video',
+      'VOICE' => '🎧 Voice note',
+      'IMAGE' => '📷 Photo',
+      _ => (body == null || body.isEmpty) ? 'A spill' : body,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _hairline),
+            ),
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(circleName,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: _plum,
+                                  fontSize: 13)),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${post['author_alias'] ?? ''} · ${_timeAgo(post['created_at'] as String?)}',
+                            style: const TextStyle(
+                                color: Colors.black45, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        snippet,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(height: 1.3),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  children: [
+                    const Icon(Icons.favorite, size: 16, color: _pink),
+                    const SizedBox(height: 2),
+                    Text('${post['upvote_count'] ?? 0}',
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.black54)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The warm empty state shown when you're in no circles yet — a big invitation
+/// to make your first one, matching the brand's cream/pink feel.
+class _EmptyCirclesState extends StatelessWidget {
+  const _EmptyCirclesState({required this.displayName});
+
+  final String? displayName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('🌸', style: TextStyle(fontSize: 56)),
+              const SizedBox(height: 16),
+              Text(
+                displayName == null
+                    ? 'Your first circle awaits'
+                    : 'Your first circle awaits, $displayName',
+                textAlign: TextAlign.center,
+                style: _headerFont(size: 24),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                "Circles are private little worlds for your people. Spill the "
+                'tea, share memories, and keep it just between you.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: Colors.black54, fontSize: 15, height: 1.5),
+              ),
+              const SizedBox(height: 28),
+              FilledButton.icon(
+                onPressed: () => startCreateCircle(context),
+                icon: const Icon(Icons.add),
+                label: const Text('Create your first circle'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _pink,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 16),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A dashed, pink-bordered call-to-action card that sits alongside the real
+/// circle cards so "make another one" is always one tap away.
+class _CreateCircleCard extends StatelessWidget {
+  const _CreateCircleCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFFFDF2F6),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _pink.withValues(alpha: 0.4)),
+          ),
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: _pink.withValues(alpha: 0.15),
+                child: const Icon(Icons.add, color: _pink),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Create New Circle',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: _pink),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1687,6 +2530,18 @@ class _CircleRail extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: FilledButton.icon(
+              onPressed: () => startCreateCircle(context),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('New Circle'),
+              style: FilledButton.styleFrom(
+                backgroundColor: _pink,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
             child: Text('YOUR CIRCLES',
@@ -1775,6 +2630,30 @@ class _CircleRail extends StatelessWidget {
                   },
                 );
               },
+            ),
+          ),
+          // "Safe space" reassurance card — the warm note from the mockup.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _lavender.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Row(
+                children: [
+                  Text('🌷', style: TextStyle(fontSize: 22)),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'A safe space for the conversations that matter.',
+                      style: TextStyle(
+                          color: Colors.black87, fontSize: 12.5, height: 1.35),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           if (displayName != null)
