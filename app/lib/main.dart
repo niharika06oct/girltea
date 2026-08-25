@@ -14,6 +14,8 @@ import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 
 import 'config.dart';
+import 'design/tokens.dart';
+import 'design/type.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,25 +28,15 @@ Future<void> main() async {
 
 final supabase = Supabase.instance.client;
 
-// ------------------------------------------------------------
-// Brand palette — from the "Visual Style" spec in the mockup:
-// warm · friendly · safe · feminine · minimal · intimate.
-// ------------------------------------------------------------
-const _pink = Color(0xFFE35B85); // primary rose — CTAs & active accents
-const _plum = Color(0xFF7A2E44); // deep plum — the Playfair wordmark
-const _lavender = Color(0xFFB7A4DB); // soft lavender — secondary accent
-const _cream = Color(0xFFF7E9DC); // warm peach surface
-const _bg = Color(0xFFFCF8F5); // warm off-white app background
-const _hairline = Color(0xFFEDE3E8); // subtle card/divider border
-
-/// Poppins SemiBold — the mockup's header face. Wraps [GoogleFonts.poppins]
-/// so header call-sites stay short.
+/// Header face helper. Poppins is dropped (mockup = Playfair + Inter only);
+/// headers now use Playfair Display. Kept as a thin wrapper so existing
+/// header call-sites stay short while they migrate to [GtText].
 TextStyle _headerFont({
   required double size,
   Color? color,
   FontWeight weight = FontWeight.w600,
 }) =>
-    GoogleFonts.poppins(fontSize: size, color: color, fontWeight: weight);
+    GoogleFonts.playfairDisplay(fontSize: size, color: color, fontWeight: weight);
 
 /// The GirlTea wordmark in Playfair Display (the mockup's "Accents" face),
 /// with the little teacup. Used on the login screen and the top bar.
@@ -66,7 +58,7 @@ class GirlTeaWordmark extends StatelessWidget {
           style: GoogleFonts.playfairDisplay(
             fontSize: fontSize,
             fontWeight: FontWeight.w700,
-            color: _plum,
+            color: context.gt.brand,
           ),
         ),
         SizedBox(width: fontSize * 0.35),
@@ -265,11 +257,11 @@ class _SignedImageState extends State<SignedImage> {
       future: _urlFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const AspectRatio(
+          return AspectRatio(
             aspectRatio: 16 / 9,
             child: ColoredBox(
-              color: Color(0xFFF0F0F0),
-              child: Icon(Icons.broken_image, color: Colors.black26),
+              color: context.gt.surfaceSunken,
+              child: Icon(Icons.broken_image, color: context.gt.onSurfaceFaint),
             ),
           );
         }
@@ -430,8 +422,8 @@ class _ReportSheetState extends State<_ReportSheet> {
                   .titleMedium
                   ?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          const Text('Your report is anonymous to other members.',
-              style: TextStyle(color: Colors.black54)),
+          Text('Your report is anonymous to other members.',
+              style: TextStyle(color: context.gt.onSurfaceMuted)),
           const SizedBox(height: 12),
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 260),
@@ -443,7 +435,7 @@ class _ReportSheetState extends State<_ReportSheet> {
                     RadioListTile<String>(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      activeColor: _pink,
+                      activeColor: context.gt.accent,
                       value: entry.key,
                       groupValue: _reason,
                       title: Text(entry.value),
@@ -465,7 +457,7 @@ class _ReportSheetState extends State<_ReportSheet> {
           ),
           const SizedBox(height: 12),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: _pink),
+            style: FilledButton.styleFrom(backgroundColor: context.gt.accent),
             onPressed: _reason == null
                 ? null
                 : () {
@@ -537,11 +529,11 @@ class _SignedVideoState extends State<SignedVideo> {
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
-      return const AspectRatio(
+      return AspectRatio(
         aspectRatio: 16 / 9,
         child: ColoredBox(
-          color: Color(0xFFF0F0F0),
-          child: Icon(Icons.broken_image, color: Colors.black26),
+          color: context.gt.surfaceSunken,
+          child: Icon(Icons.broken_image, color: context.gt.onSurfaceFaint),
         ),
       );
     }
@@ -632,14 +624,14 @@ class _SignedAudioState extends State<SignedAudio> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFFDE7EF),
+        color: context.gt.accentSoft,
         borderRadius: BorderRadius.circular(24),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (_error != null)
-            const Icon(Icons.error_outline, color: Colors.black38)
+            Icon(Icons.error_outline, color: context.gt.onSurfaceFaint)
           else if (!_loaded)
             const SizedBox(
               width: 20,
@@ -668,17 +660,17 @@ class _SignedAudioState extends State<SignedAudio> {
                         ? Icons.pause_circle_filled
                         : Icons.play_circle_fill,
                     size: 32,
-                    color: _pink,
+                    color: context.gt.accent,
                   ),
                 );
               },
             ),
           const SizedBox(width: 8),
-          const Icon(Icons.graphic_eq, size: 18, color: _pink),
+          Icon(Icons.graphic_eq, size: 18, color: context.gt.accent),
           if (widget.durationSeconds != null) ...[
             const SizedBox(width: 6),
             Text(_fmtDuration(widget.durationSeconds!),
-                style: const TextStyle(color: Colors.black54)),
+                style: TextStyle(color: context.gt.onSurfaceMuted)),
           ],
         ],
       ),
@@ -686,47 +678,188 @@ class _SignedAudioState extends State<SignedAudio> {
   }
 }
 
-/// Builds the app theme for a brightness: Inter body (Google Fonts), Poppins
-/// headers, the warm rose/cream palette, and softened card/input chrome so the
-/// whole app reads "warm · minimal · intimate" per the mockup.
+/// Builds the app theme for a brightness entirely from design tokens
+/// (design/tokens.dart + design/type.dart). Every Material surface — cards,
+/// chips, app bar, sheets, dividers, nav bar, snack bars, inputs, buttons —
+/// is themed from the same semantic [GtColors], so generic Material chrome
+/// disappears and dark mode is a pure token swap. Read colours at call-sites
+/// via `context.gt.*`, never inline hex.
 ThemeData _buildTheme(Brightness brightness) {
   final isLight = brightness == Brightness.light;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: _pink,
+  final gt = isLight ? GtColors.light : GtColors.dark;
+
+  final scheme = ColorScheme(
     brightness: brightness,
-    primary: _pink,
-    secondary: _lavender,
+    primary: gt.accent,
+    onPrimary: gt.onAccent,
+    primaryContainer: gt.accentSoft,
+    onPrimaryContainer: gt.onSurface,
+    secondary: gt.lavender,
+    onSecondary: gt.onSurface,
+    secondaryContainer: gt.accentSoft,
+    onSecondaryContainer: gt.onSurface,
+    tertiary: gt.teaBrown,
+    onTertiary: Colors.white,
+    error: gt.danger,
+    onError: isLight ? Colors.white : const Color(0xFF3A0A08),
+    surface: gt.surface,
+    onSurface: gt.onSurface,
+    surfaceContainerLowest: gt.surfaceSunken,
+    surfaceContainerLow: gt.surface,
+    surfaceContainer: gt.surfaceRaised,
+    surfaceContainerHigh: gt.surfaceRaised,
+    surfaceContainerHighest: gt.surfaceRaised,
+    onSurfaceVariant: gt.onSurfaceMuted,
+    outline: gt.hairline,
+    outlineVariant: gt.hairline,
+    shadow: Colors.black,
   );
+
   final base = ThemeData(colorScheme: scheme, useMaterial3: true);
-  final textTheme = GoogleFonts.interTextTheme(base.textTheme).copyWith(
-    headlineLarge: GoogleFonts.poppins(
-        textStyle: base.textTheme.headlineLarge, fontWeight: FontWeight.w600),
-    headlineMedium: GoogleFonts.poppins(
-        textStyle: base.textTheme.headlineMedium, fontWeight: FontWeight.w600),
-    headlineSmall: GoogleFonts.poppins(
-        textStyle: base.textTheme.headlineSmall, fontWeight: FontWeight.w600),
-    titleLarge: GoogleFonts.poppins(
-        textStyle: base.textTheme.titleLarge, fontWeight: FontWeight.w600),
-  );
+  final textTheme = gtTextTheme(gt.onSurface, gt.onSurfaceMuted);
+
+  OutlineInputBorder inputBorder(Color c, [double w = 1]) => OutlineInputBorder(
+        borderRadius: GtRadii.all(GtRadii.md),
+        borderSide: BorderSide(color: c, width: w),
+      );
+
   return base.copyWith(
-    scaffoldBackgroundColor: isLight ? _bg : null,
+    scaffoldBackgroundColor: gt.surface,
+    canvasColor: gt.surface,
+    dividerColor: gt.hairline,
     textTheme: textTheme,
-    filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-        textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+    extensions: [gt],
+    appBarTheme: AppBarTheme(
+      backgroundColor: gt.surface,
+      foregroundColor: gt.onSurface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      titleTextStyle: GtText.title(color: gt.onSurface),
+    ),
+    cardTheme: CardThemeData(
+      color: gt.surfaceRaised,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: GtRadii.all(GtRadii.lg),
+        side: BorderSide(color: gt.hairline),
       ),
     ),
+    chipTheme: ChipThemeData(
+      backgroundColor: gt.surfaceSunken,
+      selectedColor: gt.accentSoft,
+      disabledColor: gt.surfaceSunken,
+      side: BorderSide(color: gt.hairline),
+      labelStyle: GtText.label(color: gt.onSurface),
+      secondaryLabelStyle: GtText.label(color: gt.accent),
+      shape: RoundedRectangleBorder(borderRadius: GtRadii.all(GtRadii.pill)),
+      padding: const EdgeInsets.symmetric(
+          horizontal: GtSpace.md, vertical: GtSpace.xs),
+    ),
+    dividerTheme: DividerThemeData(
+      color: gt.hairline,
+      thickness: 1,
+      space: GtSpace.lg,
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: gt.surfaceRaised,
+      surfaceTintColor: Colors.transparent,
+      modalBackgroundColor: gt.surfaceRaised,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(GtRadii.xl)),
+      ),
+      showDragHandle: true,
+      dragHandleColor: gt.hairline,
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: gt.surfaceRaised,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: GtRadii.all(GtRadii.xl)),
+      titleTextStyle: GtText.title(color: gt.onSurface),
+      contentTextStyle: GtText.body(color: gt.onSurface),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: gt.surfaceRaised,
+      surfaceTintColor: Colors.transparent,
+      indicatorColor: gt.accentSoft,
+      elevation: 0,
+      height: 68,
+      labelTextStyle: WidgetStateProperty.all(GtText.overline(color: gt.onSurfaceMuted)),
+      iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
+            color: states.contains(WidgetState.selected)
+                ? gt.accent
+                : gt.onSurfaceMuted,
+          )),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: gt.onSurface,
+      contentTextStyle: GtText.body(color: gt.surface),
+      actionTextColor: gt.accent,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: GtRadii.all(GtRadii.md)),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: gt.accent,
+        foregroundColor: gt.onAccent,
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(horizontal: GtSpace.xl),
+        shape: RoundedRectangleBorder(borderRadius: GtRadii.all(GtRadii.pill)),
+        textStyle: GtText.label(),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: gt.accent,
+        textStyle: GtText.label(),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: gt.accent,
+        minimumSize: const Size(0, 48),
+        side: BorderSide(color: gt.hairline),
+        shape: RoundedRectangleBorder(borderRadius: GtRadii.all(GtRadii.pill)),
+        textStyle: GtText.label(),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(foregroundColor: gt.onSurfaceMuted),
+    ),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: gt.accent,
+      foregroundColor: gt.onAccent,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: GtRadii.all(GtRadii.lg)),
+    ),
     inputDecorationTheme: InputDecorationTheme(
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _hairline),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _pink, width: 1.6),
-      ),
+      filled: true,
+      fillColor: gt.surfaceRaised,
+      hintStyle: GtText.body(color: gt.onSurfaceFaint),
+      labelStyle: GtText.body(color: gt.onSurfaceMuted),
+      contentPadding: const EdgeInsets.symmetric(
+          horizontal: GtSpace.lg, vertical: GtSpace.md),
+      border: inputBorder(gt.hairline),
+      enabledBorder: inputBorder(gt.hairline),
+      focusedBorder: inputBorder(gt.accent, 1.6),
+      errorBorder: inputBorder(gt.danger),
+      focusedErrorBorder: inputBorder(gt.danger, 1.6),
+    ),
+    listTileTheme: ListTileThemeData(
+      iconColor: gt.onSurfaceMuted,
+      textColor: gt.onSurface,
+    ),
+    iconTheme: IconThemeData(color: gt.onSurfaceMuted),
+    tabBarTheme: TabBarThemeData(
+      labelColor: gt.accent,
+      unselectedLabelColor: gt.onSurfaceMuted,
+      indicatorColor: gt.accent,
+      labelStyle: GtText.label(),
+      unselectedLabelStyle: GtText.label(),
+      dividerColor: Colors.transparent,
     ),
   );
 }
@@ -846,7 +979,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController(text: 'diya@example.com');
+  final _emailController = TextEditingController();
   final _otpController = TextEditingController();
   bool _codeSent = false;
   bool _busy = false;
@@ -906,7 +1039,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: Theme.of(context)
                       .textTheme
                       .bodyMedium
-                      ?.copyWith(color: Colors.black54),
+                      ?.copyWith(color: context.gt.onSurfaceMuted),
                 ),
                 const SizedBox(height: 32),
                 TextField(
@@ -915,6 +1048,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(
                     labelText: 'Email',
+                    hintText: 'you@example.com',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -931,20 +1065,20 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
-                  Text(_error!, style: const TextStyle(color: Colors.red)),
+                  Text(_error!, style: TextStyle(color: context.gt.danger)),
                 ],
                 const SizedBox(height: 20),
                 FilledButton(
                   onPressed: _busy ? null : (_codeSent ? _verify : _sendCode),
-                  style: FilledButton.styleFrom(backgroundColor: _pink),
+                  style: FilledButton.styleFrom(backgroundColor: context.gt.accent),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     child: _busy
-                        ? const SizedBox(
+                        ? SizedBox(
                             height: 20,
                             width: 20,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                                strokeWidth: 2, color: context.gt.onAccent),
                           )
                         : Text(_codeSent ? 'Verify & sign in' : 'Send code'),
                   ),
@@ -1038,12 +1172,12 @@ class _HomeShellState extends State<HomeShell> {
                 displayName: gc.displayName,
                 onSelect: (s) => context.go('/$s'),
               ),
-              const VerticalDivider(width: 1, color: Color(0xFFEDE3E8)),
+              VerticalDivider(width: 1, color: context.gt.hairline),
               Expanded(
                 child: ShellLayout(embedded: true, child: widget.child),
               ),
               if (showPanel && selected != null) ...[
-                const VerticalDivider(width: 1, color: Color(0xFFEDE3E8)),
+                VerticalDivider(width: 1, color: context.gt.hairline),
                 _CirclePanel(
                   key: ValueKey('panel-${selected['id']}'),
                   group: selected,
@@ -1106,7 +1240,7 @@ class _TopBar extends StatelessWidget implements PreferredSizeWidget {
                 onPressed: group == null
                     ? null
                     : () => spillInto(context, group['id'] as String),
-                style: FilledButton.styleFrom(backgroundColor: _pink),
+                style: FilledButton.styleFrom(backgroundColor: context.gt.accent),
                 icon: const Icon(Icons.edit, size: 18),
                 label: const Text('Spill'),
               ),
@@ -1150,9 +1284,9 @@ class _ProfileMenu extends StatelessWidget {
           child: ListTile(
             contentPadding: EdgeInsets.zero,
             leading: CircleAvatar(
-              backgroundColor: _pink,
+              backgroundColor: context.gt.accent,
               child: Text(initial,
-                  style: const TextStyle(color: Colors.white)),
+                  style: TextStyle(color: context.gt.onAccent)),
             ),
             title: const Text('View Profile'),
             subtitle: Text(name, overflow: TextOverflow.ellipsis),
@@ -1180,10 +1314,10 @@ class _ProfileMenu extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: CircleAvatar(
           radius: 18,
-          backgroundColor: _pink,
+          backgroundColor: context.gt.accent,
           child: Text(initial,
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold)),
+              style: TextStyle(
+                  color: context.gt.onAccent, fontWeight: FontWeight.bold)),
         ),
       ),
     );
@@ -1438,11 +1572,11 @@ class _NotFoundPane extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.search_off, size: 40, color: Colors.black26),
+            Icon(Icons.search_off, size: 40, color: context.gt.onSurfaceFaint),
             const SizedBox(height: 12),
             Text(message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.black54)),
+                style: TextStyle(color: context.gt.onSurfaceMuted)),
             const SizedBox(height: 16),
             TextButton(
               onPressed: () => context.go('/home'),
@@ -1454,7 +1588,7 @@ class _NotFoundPane extends StatelessWidget {
     );
     if (embedded) return body;
     return Scaffold(
-      appBar: AppBar(backgroundColor: _pink, foregroundColor: Colors.white),
+      appBar: AppBar(backgroundColor: context.gt.accent, foregroundColor: context.gt.onAccent),
       body: body,
     );
   }
@@ -1519,10 +1653,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 CircleAvatar(
                   radius: 34,
-                  backgroundColor: _pink,
+                  backgroundColor: context.gt.accent,
                   child: Text(initial,
-                      style: const TextStyle(
-                          color: Colors.white,
+                      style: TextStyle(
+                          color: context.gt.onAccent,
                           fontSize: 28,
                           fontWeight: FontWeight.bold)),
                 ),
@@ -1534,17 +1668,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Text(name, style: _headerFont(size: 24)),
                       if (email.isNotEmpty)
                         Text(email,
-                            style: const TextStyle(color: Colors.black54)),
+                            style: TextStyle(color: context.gt.onSurfaceMuted)),
                     ],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Your identity is private. In each circle you post under an '
               'anonymous alias — this name is only for you.',
-              style: TextStyle(color: Colors.black54, height: 1.3),
+              style: TextStyle(color: context.gt.onSurfaceMuted, height: 1.3),
             ),
             const SizedBox(height: 24),
             _infoRow(
@@ -1574,7 +1708,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _profileTile(
               icon: Icons.delete_forever,
               title: 'Delete account',
-              color: Colors.red,
+              color: context.gt.danger,
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const DeleteAccountScreen()),
               ),
@@ -1615,10 +1749,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          Icon(icon, color: Colors.black45),
+          Icon(icon, color: context.gt.onSurfaceMuted),
           const SizedBox(width: 16),
           Text(label,
-              style: const TextStyle(color: Colors.black54)),
+              style: TextStyle(color: context.gt.onSurfaceMuted)),
           const Spacer(),
           Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
@@ -1746,10 +1880,10 @@ class _OnboardingPaneState extends State<_OnboardingPane> {
             const SizedBox(height: 12),
             Text('Welcome to GirlTea', style: _headerFont(size: 26)),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               "Let's set up your profile. This is how you'll show up inside "
               'your circles.',
-              style: TextStyle(color: Colors.black54, fontSize: 15, height: 1.4),
+              style: TextStyle(color: context.gt.onSurfaceMuted, fontSize: 15, height: 1.4),
             ),
             const SizedBox(height: 28),
             TextField(
@@ -1790,21 +1924,21 @@ class _OnboardingPaneState extends State<_OnboardingPane> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 16),
-              Text(_error!, style: const TextStyle(color: _pink)),
+              Text(_error!, style: TextStyle(color: context.gt.accent)),
             ],
             const SizedBox(height: 24),
             FilledButton(
               onPressed: _saving ? null : _submit,
               style: FilledButton.styleFrom(
-                backgroundColor: _pink,
+                backgroundColor: context.gt.accent,
                 padding: const EdgeInsets.symmetric(vertical: 16),
               ),
               child: _saving
-                  ? const SizedBox(
+                  ? SizedBox(
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2, color: context.gt.onAccent),
                     )
                   : const Text('Continue'),
             ),
@@ -1847,7 +1981,7 @@ Future<void> startCreateCircle(BuildContext context) async {
   final newId = await showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.white,
+    backgroundColor: context.gt.surfaceRaised,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
@@ -1933,7 +2067,7 @@ class _CreateCircleSheetState extends State<_CreateCircleSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.black12,
+                  color: context.gt.hairline,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1941,10 +2075,10 @@ class _CreateCircleSheetState extends State<_CreateCircleSheet> {
             const SizedBox(height: 20),
             Text('Create a circle', style: _headerFont(size: 22)),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'A private space for your people. Invite them with a link once '
               "it's made.",
-              style: TextStyle(color: Colors.black54, height: 1.4),
+              style: TextStyle(color: context.gt.onSurfaceMuted, height: 1.4),
             ),
             const SizedBox(height: 20),
             TextField(
@@ -1977,14 +2111,14 @@ class _CreateCircleSheetState extends State<_CreateCircleSheet> {
                 value: key,
                 groupValue: _policy,
                 onChanged: (v) => setState(() => _policy = v!),
-                activeColor: _pink,
+                activeColor: context.gt.accent,
                 contentPadding: EdgeInsets.zero,
                 title: Text(_policyOptions[key]!.label),
                 subtitle: Text(_policyOptions[key]!.hint),
               ),
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: const TextStyle(color: _pink)),
+              Text(_error!, style: TextStyle(color: context.gt.accent)),
             ],
             const SizedBox(height: 20),
             SizedBox(
@@ -1992,15 +2126,15 @@ class _CreateCircleSheetState extends State<_CreateCircleSheet> {
               child: FilledButton(
                 onPressed: _saving ? null : _create,
                 style: FilledButton.styleFrom(
-                  backgroundColor: _pink,
+                  backgroundColor: context.gt.accent,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
                 child: _saving
-                    ? const SizedBox(
+                    ? SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                            strokeWidth: 2, color: context.gt.onAccent),
                       )
                     : const Text('Create circle'),
               ),
@@ -2062,10 +2196,10 @@ class _CirclesOverview extends StatelessWidget {
                         style: _headerFont(size: 26),
                       ),
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         'The people who know you. Pick a circle to catch up '
                         'on the tea.',
-                        style: TextStyle(color: Colors.black54, fontSize: 15),
+                        style: TextStyle(color: context.gt.onSurfaceMuted, fontSize: 15),
                       ),
                     ],
                   ),
@@ -2076,7 +2210,7 @@ class _CirclesOverview extends StatelessWidget {
                   icon: const Icon(Icons.add),
                   label: const Text('New Circle'),
                   style: FilledButton.styleFrom(
-                    backgroundColor: _pink,
+                    backgroundColor: context.gt.accent,
                     padding: const EdgeInsets.symmetric(
                         horizontal: 18, vertical: 14),
                   ),
@@ -2206,10 +2340,10 @@ class _RecentSpillsState extends State<_RecentSpills> {
             ),
             const SizedBox(height: 16),
             if (posts.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Text('No spills yet. Be the first to share something.',
-                    style: TextStyle(color: Colors.black45)),
+                    style: TextStyle(color: context.gt.onSurfaceMuted)),
               )
             else
               for (final p in posts)
@@ -2233,14 +2367,14 @@ class _RecentSpillsState extends State<_RecentSpills> {
       selected: active,
       onSelected: (_) => onTap(),
       showCheckmark: false,
-      selectedColor: _pink,
-      backgroundColor: Colors.white,
+      selectedColor: context.gt.accent,
+      backgroundColor: context.gt.surfaceRaised,
       labelStyle: TextStyle(
-        color: active ? Colors.white : Colors.black87,
+        color: active ? context.gt.onAccent : context.gt.onSurface,
         fontWeight: active ? FontWeight.w600 : FontWeight.w500,
       ),
       shape: StadiumBorder(
-        side: BorderSide(color: active ? _pink : _hairline),
+        side: BorderSide(color: active ? context.gt.accent : context.gt.hairline),
       ),
     );
   }
@@ -2272,7 +2406,7 @@ class _SpillTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
-        color: Colors.white,
+        color: context.gt.surfaceRaised,
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
@@ -2280,7 +2414,7 @@ class _SpillTile extends StatelessWidget {
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _hairline),
+              border: Border.all(color: context.gt.hairline),
             ),
             padding: const EdgeInsets.all(14),
             child: Row(
@@ -2293,15 +2427,15 @@ class _SpillTile extends StatelessWidget {
                       Row(
                         children: [
                           Text(circleName,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  color: _plum,
+                                  color: context.gt.brand,
                                   fontSize: 13)),
                           const SizedBox(width: 8),
                           Text(
                             '${post['author_alias'] ?? ''} · ${_timeAgo(post['created_at'] as String?)}',
-                            style: const TextStyle(
-                                color: Colors.black45, fontSize: 12),
+                            style: TextStyle(
+                                color: context.gt.onSurfaceMuted, fontSize: 12),
                           ),
                         ],
                       ),
@@ -2318,11 +2452,11 @@ class _SpillTile extends StatelessWidget {
                 const SizedBox(width: 12),
                 Column(
                   children: [
-                    const Icon(Icons.favorite, size: 16, color: _pink),
+                    Icon(Icons.favorite, size: 16, color: context.gt.accent),
                     const SizedBox(height: 2),
                     Text('${post['upvote_count'] ?? 0}',
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.black54)),
+                        style: TextStyle(
+                            fontSize: 12, color: context.gt.onSurfaceMuted)),
                   ],
                 ),
               ],
@@ -2361,12 +2495,12 @@ class _EmptyCirclesState extends StatelessWidget {
                 style: _headerFont(size: 24),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 "Circles are private little worlds for your people. Spill the "
                 'tea, share memories, and keep it just between you.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    color: Colors.black54, fontSize: 15, height: 1.5),
+                    color: context.gt.onSurfaceMuted, fontSize: 15, height: 1.5),
               ),
               const SizedBox(height: 28),
               FilledButton.icon(
@@ -2374,7 +2508,7 @@ class _EmptyCirclesState extends StatelessWidget {
                 icon: const Icon(Icons.add),
                 label: const Text('Create your first circle'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: _pink,
+                  backgroundColor: context.gt.accent,
                   padding: const EdgeInsets.symmetric(
                       horizontal: 24, vertical: 16),
                 ),
@@ -2397,7 +2531,7 @@ class _CreateCircleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFFFDF2F6),
+      color: context.gt.accentSoft,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -2405,24 +2539,24 @@ class _CreateCircleCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _pink.withValues(alpha: 0.4)),
+            border: Border.all(color: context.gt.accent.withValues(alpha: 0.4)),
           ),
           padding: const EdgeInsets.all(18),
           child: Row(
             children: [
               CircleAvatar(
                 radius: 22,
-                backgroundColor: _pink.withValues(alpha: 0.15),
-                child: const Icon(Icons.add, color: _pink),
+                backgroundColor: context.gt.accent.withValues(alpha: 0.15),
+                child: Icon(Icons.add, color: context.gt.accent),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Create New Circle',
                   style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: _pink),
+                      color: context.gt.accent),
                 ),
               ),
             ],
@@ -2444,7 +2578,7 @@ class _CircleOverviewCard extends StatelessWidget {
     final glyph = _circleGlyph(group['id'] as String);
     final desc = (group['description'] ?? '') as String;
     return Material(
-      color: Colors.white,
+      color: context.gt.surfaceRaised,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -2452,7 +2586,7 @@ class _CircleOverviewCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFEDE3E8)),
+            border: Border.all(color: context.gt.hairline),
           ),
           padding: const EdgeInsets.all(18),
           child: Column(
@@ -2478,12 +2612,12 @@ class _CircleOverviewCard extends StatelessWidget {
                               fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                         Text('${group['member_count']} members',
-                            style: const TextStyle(
-                                color: Colors.black45, fontSize: 13)),
+                            style: TextStyle(
+                                color: context.gt.onSurfaceMuted, fontSize: 13)),
                       ],
                     ),
                   ),
-                  const Icon(Icons.chevron_right, color: Colors.black26),
+                  Icon(Icons.chevron_right, color: context.gt.onSurfaceFaint),
                 ],
               ),
               if (desc.isNotEmpty) ...[
@@ -2492,7 +2626,7 @@ class _CircleOverviewCard extends StatelessWidget {
                   desc,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.black54, height: 1.3),
+                  style: TextStyle(color: context.gt.onSurfaceMuted, height: 1.3),
                 ),
               ],
             ],
@@ -2525,7 +2659,7 @@ class _CircleRail extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 264,
-      color: const Color(0xFFFCF7F9),
+      color: context.gt.surfaceRaised,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2537,16 +2671,16 @@ class _CircleRail extends StatelessWidget {
               icon: const Icon(Icons.add, size: 18),
               label: const Text('New Circle'),
               style: FilledButton.styleFrom(
-                backgroundColor: _pink,
+                backgroundColor: context.gt.accent,
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
           ),
-          const Padding(
+          Padding(
             padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
             child: Text('YOUR CIRCLES',
                 style: TextStyle(
-                    color: Colors.black38,
+                    color: context.gt.onSurfaceFaint,
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.8)),
@@ -2562,10 +2696,10 @@ class _CircleRail extends StatelessWidget {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (list.isEmpty) {
-                  return const Padding(
+                  return Padding(
                     padding: EdgeInsets.all(20),
                     child: Text('You are not in any circles yet.',
-                        style: TextStyle(color: Colors.black45)),
+                        style: TextStyle(color: context.gt.onSurfaceMuted)),
                   );
                 }
                 return ListView.builder(
@@ -2580,7 +2714,7 @@ class _CircleRail extends StatelessWidget {
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
                       child: Material(
-                        color: active ? const Color(0xFFF6D9E4) : Colors.transparent,
+                        color: active ? context.gt.accentSoft : Colors.transparent,
                         borderRadius: BorderRadius.circular(12),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
@@ -2610,13 +2744,13 @@ class _CircleRail extends StatelessWidget {
                                               ? FontWeight.bold
                                               : FontWeight.w500,
                                           color: active
-                                              ? _pink
-                                              : Colors.black87,
+                                              ? context.gt.accent
+                                              : context.gt.onSurface,
                                         ),
                                       ),
                                       Text('${g['member_count']}',
-                                          style: const TextStyle(
-                                              color: Colors.black38,
+                                          style: TextStyle(
+                                              color: context.gt.onSurfaceFaint,
                                               fontSize: 12)),
                                     ],
                                   ),
@@ -2638,10 +2772,10 @@ class _CircleRail extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: _lavender.withValues(alpha: 0.18),
+                color: context.gt.lavender.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Row(
+              child: Row(
                 children: [
                   Text('🌷', style: TextStyle(fontSize: 22)),
                   SizedBox(width: 10),
@@ -2649,7 +2783,7 @@ class _CircleRail extends StatelessWidget {
                     child: Text(
                       'A safe space for the conversations that matter.',
                       style: TextStyle(
-                          color: Colors.black87, fontSize: 12.5, height: 1.35),
+                          color: context.gt.onSurface, fontSize: 12.5, height: 1.35),
                     ),
                   ),
                 ],
@@ -2661,13 +2795,13 @@ class _CircleRail extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
               child: Row(
                 children: [
-                  const Icon(Icons.person_outline,
-                      size: 18, color: Colors.black38),
+                  Icon(Icons.person_outline,
+                      size: 18, color: context.gt.onSurfaceFaint),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(displayName!,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.black54)),
+                        style: TextStyle(color: context.gt.onSurfaceMuted)),
                   ),
                 ],
               ),
@@ -2721,7 +2855,7 @@ class _CirclePanelState extends State<_CirclePanel> {
     final members = _members;
     return Container(
       width: 300,
-      color: const Color(0xFFFCF7F9),
+      color: context.gt.surfaceRaised,
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -2742,17 +2876,17 @@ class _CirclePanelState extends State<_CirclePanel> {
           const SizedBox(height: 4),
           Center(
             child: Text('${g['member_count']} members',
-                style: const TextStyle(color: Colors.black45, fontSize: 13)),
+                style: TextStyle(color: context.gt.onSurfaceMuted, fontSize: 13)),
           ),
           if (desc.isNotEmpty) ...[
             const SizedBox(height: 16),
             Text(desc,
-                style: const TextStyle(color: Colors.black87, height: 1.4)),
+                style: TextStyle(color: context.gt.onSurface, height: 1.4)),
           ],
           const SizedBox(height: 24),
-          const Text('IN THIS CIRCLE',
+          Text('IN THIS CIRCLE',
               style: TextStyle(
-                  color: Colors.black38,
+                  color: context.gt.onSurfaceFaint,
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.8)),
@@ -2773,21 +2907,21 @@ class _CirclePanelState extends State<_CirclePanel> {
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   children: [
-                    const CircleAvatar(
+                    CircleAvatar(
                       radius: 12,
-                      backgroundColor: Color(0xFFF6D9E4),
+                      backgroundColor: context.gt.accentSoft,
                       child: Text('🌷', style: TextStyle(fontSize: 12)),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(m['alias'] ?? 'anon',
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.black87)),
+                          style: TextStyle(color: context.gt.onSurface)),
                     ),
                     if (m['is_me'] == true)
-                      const Text('you',
+                      Text('you',
                           style: TextStyle(
-                              color: _pink,
+                              color: context.gt.accent,
                               fontSize: 12,
                               fontWeight: FontWeight.w600)),
                   ],
@@ -2797,24 +2931,24 @@ class _CirclePanelState extends State<_CirclePanel> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFFDE7EF),
+              color: context.gt.accentSoft,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
+              children: [
                 Row(
                   children: [
-                    Icon(Icons.bookmark_border, size: 18, color: _pink),
+                    Icon(Icons.bookmark_border, size: 18, color: context.gt.accent),
                     SizedBox(width: 6),
                     Text('Circle Memories',
                         style: TextStyle(
-                            fontWeight: FontWeight.bold, color: _pink)),
+                            fontWeight: FontWeight.bold, color: context.gt.accent)),
                   ],
                 ),
                 SizedBox(height: 6),
                 Text('Tea you save before it goes cold will live here.',
-                    style: TextStyle(color: Colors.black54, fontSize: 13)),
+                    style: TextStyle(color: context.gt.onSurfaceMuted, fontSize: 13)),
               ],
             ),
           ),
@@ -2990,7 +3124,7 @@ class _FeedScreenState extends State<FeedScreen> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: context.gt.danger),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete'),
           ),
@@ -3130,7 +3264,7 @@ class _FeedScreenState extends State<FeedScreen> {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: Color(0xFFEDE3E8)),
+        side: BorderSide(color: context.gt.hairline),
       ),
       child: InkWell(
         onTap: postId == null ? null : () => _openComments(p),
@@ -3148,16 +3282,16 @@ class _FeedScreenState extends State<FeedScreen> {
                           child: Text(
                             p['author_alias'] ?? 'anon',
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, color: _pink),
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, color: context.gt.accent),
                           ),
                         ),
                         if (ago.isNotEmpty) ...[
-                          const Text('  ·  ',
-                              style: TextStyle(color: Colors.black26)),
+                          Text('  ·  ',
+                              style: TextStyle(color: context.gt.onSurfaceFaint)),
                           Text(ago,
-                              style: const TextStyle(
-                                  color: Colors.black45, fontSize: 13)),
+                              style: TextStyle(
+                                  color: context.gt.onSurfaceMuted, fontSize: 13)),
                         ],
                       ],
                     ),
@@ -3201,7 +3335,7 @@ class _FeedScreenState extends State<FeedScreen> {
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                     iconSize: 20,
-                    color: _pink,
+                    color: context.gt.accent,
                     tooltip: upvoted ? 'Remove tea drop' : 'Tea drop',
                     icon: Icon(
                         upvoted ? Icons.favorite : Icons.favorite_border),
@@ -3209,12 +3343,12 @@ class _FeedScreenState extends State<FeedScreen> {
                   ),
                   const SizedBox(width: 6),
                   Text('${p['upvote_count']}',
-                      style: const TextStyle(color: Colors.black54)),
+                      style: TextStyle(color: context.gt.onSurfaceMuted)),
                   const SizedBox(width: 20),
-                  const Icon(Icons.mode_comment_outlined,
-                      size: 18, color: Colors.black45),
+                  Icon(Icons.mode_comment_outlined,
+                      size: 18, color: context.gt.onSurfaceMuted),
                   const SizedBox(width: 6),
-                  const Text('Spill', style: TextStyle(color: Colors.black45)),
+                  Text('Spill', style: TextStyle(color: context.gt.onSurfaceMuted)),
                 ],
               ),
             ],
@@ -3234,8 +3368,8 @@ class _FeedScreenState extends State<FeedScreen> {
         children: [
           Container(
             padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Color(0xFFEDE3E8))),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: context.gt.hairline)),
             ),
             child: Row(
               children: [
@@ -3250,7 +3384,7 @@ class _FeedScreenState extends State<FeedScreen> {
                 if (_isModerator)
                   IconButton(
                     tooltip: 'Moderation queue',
-                    icon: const Icon(Icons.shield_outlined, color: _pink),
+                    icon: Icon(Icons.shield_outlined, color: context.gt.accent),
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) =>
@@ -3269,8 +3403,8 @@ class _FeedScreenState extends State<FeedScreen> {
     // Full screen: mobile navigation (pushed route with AppBar + FAB).
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: _pink,
-        foregroundColor: Colors.white,
+        backgroundColor: context.gt.accent,
+        foregroundColor: context.gt.onAccent,
         title: Text(widget.groupName),
         actions: [
           if (_isModerator)
@@ -3287,8 +3421,8 @@ class _FeedScreenState extends State<FeedScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: _pink,
-        foregroundColor: Colors.white,
+        backgroundColor: context.gt.accent,
+        foregroundColor: context.gt.onAccent,
         onPressed: _myAlias == null ? null : _openComposer,
         icon: const Icon(Icons.edit),
         label: const Text('Spill'),
@@ -3314,16 +3448,16 @@ class _PostMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
-      icon: const Icon(Icons.more_horiz, size: 20, color: Colors.black38),
+      icon: Icon(Icons.more_horiz, size: 20, color: context.gt.onSurfaceFaint),
       tooltip: 'More',
       onSelected: (v) => v == 'delete' ? onDelete() : onReport(),
       itemBuilder: (_) => [
         if (isMine)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'delete',
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.delete_outline, color: Colors.red),
+              leading: Icon(Icons.delete_outline, color: context.gt.danger),
               title: Text('Delete'),
             ),
           )
@@ -3773,18 +3907,18 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
             Container(
               height: 120,
               decoration: BoxDecoration(
-                color: const Color(0xFFEDEDED),
+                color: context.gt.hairline,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Center(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.movie_outlined, color: _pink),
+                    Icon(Icons.movie_outlined, color: context.gt.accent),
                     const SizedBox(width: 8),
                     Text('Video ready'
                         '${_durationSeconds != null ? ' · ${_fmtDuration(_durationSeconds!)}' : ''}',
-                        style: const TextStyle(color: Colors.black54)),
+                        style: TextStyle(color: context.gt.onSurfaceMuted)),
                   ],
                 ),
               ),
@@ -3796,32 +3930,32 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
-            color: const Color(0xFFFDE7EF),
+            color: context.gt.accentSoft,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
               if (_recording) ...[
-                const Icon(Icons.fiber_manual_record,
-                    color: Colors.red, size: 16),
+                Icon(Icons.fiber_manual_record,
+                    color: context.gt.danger, size: 16),
                 const SizedBox(width: 8),
                 Text('Recording… ${_fmtDuration(_recordSeconds)}',
-                    style: const TextStyle(color: Colors.black87)),
+                    style: TextStyle(color: context.gt.onSurface)),
                 const Spacer(),
                 TextButton.icon(
                   onPressed: _stopRecording,
-                  icon: const Icon(Icons.stop_circle, color: _pink),
+                  icon: Icon(Icons.stop_circle, color: context.gt.accent),
                   label: const Text('Stop'),
                 ),
               ] else ...[
-                const Icon(Icons.graphic_eq, color: _pink),
+                Icon(Icons.graphic_eq, color: context.gt.accent),
                 const SizedBox(width: 8),
                 Text('Voice note'
                     '${_durationSeconds != null ? ' · ${_fmtDuration(_durationSeconds!)}' : ''}',
-                    style: const TextStyle(color: Colors.black87)),
+                    style: TextStyle(color: context.gt.onSurface)),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.black54),
+                  icon: Icon(Icons.close, color: context.gt.onSurfaceMuted),
                   tooltip: 'Remove',
                   onPressed: _busy ? null : _clearMedia,
                 ),
@@ -3853,11 +3987,11 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
         children: [
           Row(
             children: [
-              const Text('Posting as ',
-                  style: TextStyle(color: Colors.black54)),
+              Text('Posting as ',
+                  style: TextStyle(color: context.gt.onSurfaceMuted)),
               Text(widget.authorAlias,
-                  style: const TextStyle(
-                      color: _pink, fontWeight: FontWeight.bold)),
+                  style: TextStyle(
+                      color: context.gt.accent, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 12),
@@ -3877,7 +4011,7 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.red)),
+            Text(_error!, style: TextStyle(color: context.gt.danger)),
           ],
           const SizedBox(height: 12),
           Row(
@@ -3886,19 +4020,19 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
                 IconButton(
                   onPressed: _busy ? null : _pickImage,
                   icon: const Icon(Icons.image_outlined),
-                  color: _pink,
+                  color: context.gt.accent,
                   tooltip: 'Add photo',
                 ),
                 IconButton(
                   onPressed: _busy ? null : () => _pickVideoMenu(context),
                   icon: const Icon(Icons.videocam_outlined),
-                  color: _pink,
+                  color: context.gt.accent,
                   tooltip: 'Add video',
                 ),
                 IconButton(
                   onPressed: _busy ? null : _toggleRecording,
                   icon: const Icon(Icons.mic_none),
-                  color: _pink,
+                  color: context.gt.accent,
                   tooltip: 'Record voice',
                 ),
               ],
@@ -3906,15 +4040,15 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
               Expanded(
                 child: FilledButton(
                   onPressed: (_busy || _recording) ? null : _submit,
-                  style: FilledButton.styleFrom(backgroundColor: _pink),
+                  style: FilledButton.styleFrom(backgroundColor: context.gt.accent),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     child: _busy
-                        ? const SizedBox(
+                        ? SizedBox(
                             height: 20,
                             width: 20,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                                strokeWidth: 2, color: context.gt.onAccent),
                           )
                         : const Text('Post'),
                   ),
@@ -3936,12 +4070,12 @@ class _ComposePostSheetState extends State<ComposePostSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.video_library_outlined, color: _pink),
+              leading: Icon(Icons.video_library_outlined, color: context.gt.accent),
               title: const Text('Choose a video'),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
             ListTile(
-              leading: const Icon(Icons.videocam_outlined, color: _pink),
+              leading: Icon(Icons.videocam_outlined, color: context.gt.accent),
               title: const Text('Record a video'),
               subtitle: const Text('Uses your camera where supported'),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
@@ -4103,8 +4237,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
     final comments = _comments;
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: _pink,
-        foregroundColor: Colors.white,
+        backgroundColor: context.gt.accent,
+        foregroundColor: context.gt.onAccent,
         title: const Text('The Tea'),
       ),
       body: Column(
@@ -4112,14 +4246,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
           // The post being replied to.
           Container(
             width: double.infinity,
-            color: const Color(0xFFFDE7EF),
+            color: context.gt.accentSoft,
             padding: const EdgeInsets.all(14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(widget.postAlias,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, color: _pink)),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: context.gt.accent)),
                 const SizedBox(height: 6),
                 Text(widget.postBody ?? ''),
               ],
@@ -4156,10 +4290,10 @@ class _CommentsScreenState extends State<CommentsScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             if (isReply)
-                              const Padding(
+                              Padding(
                                 padding: EdgeInsets.only(right: 8, top: 2),
                                 child: Icon(Icons.subdirectory_arrow_right,
-                                    size: 16, color: Colors.black38),
+                                    size: 16, color: context.gt.onSurfaceFaint),
                               ),
                             Expanded(
                               child: Column(
@@ -4170,9 +4304,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                                       Expanded(
                                         child: Text(
                                           c['author_alias'] ?? 'anon',
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                               fontWeight: FontWeight.bold,
-                                              color: _pink),
+                                              color: context.gt.accent),
                                         ),
                                       ),
                                       // Can only report a comment that
@@ -4184,10 +4318,10 @@ class _CommentsScreenState extends State<CommentsScreen> {
                                             targetType: 'COMMENT',
                                             targetId: c['id'] as String,
                                           ),
-                                          child: const Padding(
+                                          child: Padding(
                                             padding: EdgeInsets.all(4),
                                             child: Icon(Icons.flag_outlined,
-                                                size: 16, color: Colors.black38),
+                                                size: 16, color: context.gt.onSurfaceFaint),
                                           ),
                                         ),
                                     ],
@@ -4203,7 +4337,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                                           minimumSize: const Size(0, 28),
                                           tapTargetSize: MaterialTapTargetSize
                                               .shrinkWrap,
-                                          foregroundColor: Colors.black54,
+                                          foregroundColor: context.gt.onSurfaceMuted,
                                         ),
                                         onPressed: () => _startReply(c),
                                         child: const Text('Spill More'),
@@ -4224,15 +4358,15 @@ class _CommentsScreenState extends State<CommentsScreen> {
           const Divider(height: 1),
           if (_replyingTo != null)
             Container(
-              color: const Color(0xFFFDE7EF),
+              color: context.gt.accentSoft,
               padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
               child: Row(
                 children: [
                   Expanded(
                     child: Text(
                       'Spilling more to ${_replyingTo!['author_alias'] ?? 'anon'}',
-                      style: const TextStyle(
-                          color: _pink, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                          color: context.gt.accent, fontWeight: FontWeight.w600),
                     ),
                   ),
                   IconButton(
@@ -4274,7 +4408,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     ),
                   ),
                   IconButton(
-                    color: _pink,
+                    color: context.gt.accent,
                     icon: _sending
                         ? const SizedBox(
                             height: 20,
@@ -4366,8 +4500,8 @@ class _ModerationQueueScreenState extends State<ModerationQueueScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: _pink,
-        foregroundColor: Colors.white,
+        backgroundColor: context.gt.accent,
+        foregroundColor: context.gt.onAccent,
         title: Text('Moderation · ${widget.groupName}'),
       ),
       body: Builder(
@@ -4428,15 +4562,15 @@ class _ReportCard extends StatelessWidget {
               children: [
                 Chip(
                   visualDensity: VisualDensity.compact,
-                  backgroundColor: const Color(0xFFFDE7EF),
+                  backgroundColor: context.gt.accentSoft,
                   side: BorderSide.none,
                   label: Text('$targetType · $reasonLabel',
-                      style: const TextStyle(color: _pink, fontWeight: FontWeight.w600)),
+                      style: TextStyle(color: context.gt.accent, fontWeight: FontWeight.w600)),
                 ),
                 const Spacer(),
                 if (status == 'UNDER_REVIEW')
-                  const Text('under review',
-                      style: TextStyle(color: Colors.black45, fontSize: 12)),
+                  Text('under review',
+                      style: TextStyle(color: context.gt.onSurfaceMuted, fontSize: 12)),
               ],
             ),
             const SizedBox(height: 8),
@@ -4445,7 +4579,7 @@ class _ReportCard extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFFF6F6F6),
+                color: context.gt.surfaceSunken,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
@@ -4453,14 +4587,14 @@ class _ReportCard extends StatelessWidget {
                 children: [
                   if (snapshotAlias != null)
                     Text(snapshotAlias,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.black87)),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: context.gt.onSurface)),
                   const SizedBox(height: 2),
                   Text(
                     snapshotBody?.isNotEmpty == true
                         ? snapshotBody!
                         : '[media or empty — captured at report time]',
-                    style: const TextStyle(color: Colors.black54),
+                    style: TextStyle(color: context.gt.onSurfaceMuted),
                   ),
                 ],
               ),
@@ -4468,8 +4602,8 @@ class _ReportCard extends StatelessWidget {
             if (details != null && details.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text('Reporter note: $details',
-                  style: const TextStyle(
-                      fontStyle: FontStyle.italic, color: Colors.black54)),
+                  style: TextStyle(
+                      fontStyle: FontStyle.italic, color: context.gt.onSurfaceMuted)),
             ],
             const SizedBox(height: 10),
             Wrap(
@@ -4571,8 +4705,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     final canDelete = _confirmController.text.trim().toUpperCase() == 'DELETE';
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: _pink,
-        foregroundColor: Colors.white,
+        backgroundColor: context.gt.accent,
+        foregroundColor: context.gt.onAccent,
         title: const Text('Delete account'),
       ),
       body: Padding(
@@ -4583,12 +4717,12 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             const Text('This permanently erases your account.',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'We will scrub your profile, remove your posts, comments and '
               'uploaded media, and drop you from every group. Reports you '
               'filed stay open for moderators, but your personal details are '
               'wiped. This cannot be undone.',
-              style: TextStyle(color: Colors.black54),
+              style: TextStyle(color: context.gt.onSurfaceMuted),
             ),
             const SizedBox(height: 20),
             TextField(
@@ -4602,16 +4736,16 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             ),
             const SizedBox(height: 20),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              style: FilledButton.styleFrom(backgroundColor: context.gt.danger),
               onPressed: (_busy || !canDelete) ? null : _erase,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: _busy
-                    ? const SizedBox(
+                    ? SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                            strokeWidth: 2, color: context.gt.onAccent),
                       )
                     : const Text('Delete my account'),
               ),
