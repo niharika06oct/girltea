@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:html' as html;
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -90,6 +91,114 @@ class ThemeController extends ChangeNotifier {
 }
 
 final themeController = ThemeController();
+
+// ============================================================
+// Themed background art — a few themes (Cotton Candy, Queer Joy, Indigo
+// Nights) carry aesthetic wallpapers via GtThemeArt. [ThemedBackdrop] paints
+// an ambient piece full-bleed behind a screen (login, onboarding, empty
+// states) under a surface scrim so foreground text stays readable;
+// [ThemedQuoteCard] shows a quote wallpaper whole as hero art in empty
+// states. On themes without art both degrade gracefully to a plain surface /
+// nothing, so the other themes look exactly as before.
+// ============================================================
+
+/// Full-bleed ambient wallpaper behind [child], faded under a surface scrim.
+/// Always paints the theme surface first, so callers can (and should) give
+/// their Scaffold a transparent background. Picks one image from the active
+/// theme's ambient pool per mount — so revisiting a screen rotates the art.
+class ThemedBackdrop extends StatefulWidget {
+  const ThemedBackdrop({super.key, required this.child, this.opacity = 0.30});
+
+  final Widget child;
+  final double opacity;
+
+  @override
+  State<ThemedBackdrop> createState() => _ThemedBackdropState();
+}
+
+class _ThemedBackdropState extends State<ThemedBackdrop> {
+  late final int _pick = math.Random().nextInt(1 << 30);
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: themeController,
+      builder: (context, _) {
+        final gt = context.gt;
+        final art = themeController.theme.art;
+        final hasArt = art != null && art.ambient.isNotEmpty;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            // Base surface so a transparent Scaffold always has a floor.
+            Positioned.fill(child: ColoredBox(color: gt.surface)),
+            if (hasArt) ...[
+              Positioned.fill(
+                child: Opacity(
+                  opacity: widget.opacity,
+                  child: Image.asset(
+                    art.ambient[_pick % art.ambient.length],
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+              // Surface-toned scrim: stronger top/bottom, softer middle, so the
+              // wallpaper reads as atmosphere and never fights the content.
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        gt.surface.withValues(alpha: 0.74),
+                        gt.surface.withValues(alpha: 0.52),
+                        gt.surface.withValues(alpha: 0.80),
+                      ],
+                      stops: const [0.0, 0.5, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            widget.child,
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A themed quote wallpaper shown whole (framed, soft-shadowed) as hero art in
+/// an empty state. Renders nothing on themes without art. [seed] keeps the
+/// pick stable for a given context (e.g. a circle id) so it doesn't flicker.
+class ThemedQuoteCard extends StatelessWidget {
+  const ThemedQuoteCard({super.key, this.seed = 0, this.width = 260});
+
+  final int seed;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final art = themeController.theme.art;
+    if (art == null || art.cards.isEmpty) return const SizedBox.shrink();
+    final asset = art.cards[seed.abs() % art.cards.length];
+    return Container(
+      width: width,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: GtRadii.organic(base: GtRadii.lg),
+        boxShadow: GtShadow.soft(Theme.of(context).brightness),
+      ),
+      child: Image.asset(
+        asset,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      ),
+    );
+  }
+}
 
 // Bumped whenever a post is created from the global "Spill" button so the
 // currently-visible feed (only one is mounted at a time) reloads itself.
@@ -1039,17 +1148,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const GirlTeaWordmark(fontSize: 40, center: true),
+    return ThemedBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const GirlTeaWordmark(fontSize: 40, center: true),
                 const SizedBox(height: 8),
                 Text(
                   'Vent. Support. Spill the tea.',
@@ -1111,7 +1222,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             }),
                     child: const Text('Use a different email'),
                   ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1974,14 +2086,15 @@ class _OnboardingPaneState extends State<_OnboardingPane> {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(32),
-          children: [
-            const Text('🌸', style: TextStyle(fontSize: 44)),
+    return ThemedBackdrop(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(32),
+            children: [
+              const Text('🌸', style: TextStyle(fontSize: 44)),
             const SizedBox(height: 12),
             Text('Welcome to GirlTea', style: _headerFont(size: 26)),
             const SizedBox(height: 6),
@@ -2046,8 +2159,9 @@ class _OnboardingPaneState extends State<_OnboardingPane> {
                           strokeWidth: 2, color: context.gt.onAccent),
                     )
                   : const Text('Continue'),
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2582,43 +2696,54 @@ class _EmptyCirclesState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('🌸', style: TextStyle(fontSize: 56)),
-              const SizedBox(height: 16),
-              Text(
-                displayName == null
-                    ? 'Your first circle awaits'
-                    : 'Your first circle awaits, $displayName',
-                textAlign: TextAlign.center,
-                style: _headerFont(size: 24),
+    // On themes with art, lead with a quote wallpaper instead of the emoji.
+    final hasArt = themeController.theme.art?.cards.isNotEmpty ?? false;
+    return ThemedBackdrop(
+      child: Center(
+        child: SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (hasArt)
+                    const ThemedQuoteCard(seed: 0, width: 240)
+                  else
+                    const Text('🌸', style: TextStyle(fontSize: 56)),
+                  const SizedBox(height: 20),
+                  Text(
+                    displayName == null
+                        ? 'Your first circle awaits'
+                        : 'Your first circle awaits, $displayName',
+                    textAlign: TextAlign.center,
+                    style: _headerFont(size: 24),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Circles are private little worlds for your people. Spill "
+                    'the tea, share memories, and keep it just between you.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: context.gt.onSurfaceMuted,
+                        fontSize: 15,
+                        height: 1.5),
+                  ),
+                  const SizedBox(height: 28),
+                  FilledButton.icon(
+                    onPressed: () => startCreateCircle(context),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create your first circle'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.gt.accent,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 16),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                "Circles are private little worlds for your people. Spill the "
-                'tea, share memories, and keep it just between you.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: context.gt.onSurfaceMuted, fontSize: 15, height: 1.5),
-              ),
-              const SizedBox(height: 28),
-              FilledButton.icon(
-                onPressed: () => startCreateCircle(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Create your first circle'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: context.gt.accent,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 16),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -3396,8 +3521,24 @@ class _FeedScreenState extends State<FeedScreen> {
             children: [
               SizedBox(
                 height: constraints.maxHeight,
-                child: const Center(
-                  child: Text('No tea yet. Be the first to spill ☕'),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Themed quote wallpaper (seeded per-circle so each room
+                      // shows a different one); nothing on themes without art.
+                      ThemedQuoteCard(
+                        seed: widget.groupId.hashCode,
+                        width: 220,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'No tea yet. Be the first to spill ☕',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: context.gt.onSurfaceMuted),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

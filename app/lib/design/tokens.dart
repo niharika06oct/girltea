@@ -214,6 +214,22 @@ enum GtThemeId {
   noirClub,
 }
 
+// ------------------------------------------------------------
+// Theme background art — the aesthetic wallpapers a few themes carry.
+// [ambient] are textless/photographic pieces shown full-bleed behind UI at
+// low opacity (login, onboarding, empty screens); [cards] are the quote
+// wallpapers shown *whole* as hero art in empty states. Assets live under
+// assets/themes/<theme>/. Themes without art leave this null → no change.
+// ------------------------------------------------------------
+@immutable
+class GtThemeArt {
+  const GtThemeArt({required this.ambient, required this.cards});
+  final List<String> ambient;
+  final List<String> cards;
+
+  bool get isEmpty => ambient.isEmpty && cards.isEmpty;
+}
+
 @immutable
 class GtTheme {
   const GtTheme({
@@ -224,6 +240,7 @@ class GtTheme {
     required this.brightness,
     required this.colors,
     required this.swatches,
+    this.art,
   });
 
   final GtThemeId id;
@@ -233,6 +250,7 @@ class GtTheme {
   final Brightness brightness;
   final GtColors colors;
   final List<Color> swatches; // preview dots for the picker card
+  final GtThemeArt? art; // optional background wallpapers/quote cards
 
   bool get isDark => brightness == Brightness.dark;
 }
@@ -250,6 +268,22 @@ const List<GtTheme> gtThemes = [
     emoji: '🎀',
     brightness: Brightness.light,
     swatches: [Color(0xFFF4A9C4), Color(0xFFF7C6D6), Color(0xFFD9C7EA)],
+    art: GtThemeArt(
+      ambient: [
+        'assets/themes/cotton_candy/ambient1.png',
+        'assets/themes/cotton_candy/ambient2.png',
+        'assets/themes/cotton_candy/ambient3.png',
+        'assets/themes/cotton_candy/ambient4.png',
+        'assets/themes/cotton_candy/ambient5.png',
+      ],
+      cards: [
+        'assets/themes/cotton_candy/card1.png',
+        'assets/themes/cotton_candy/card2.png',
+        'assets/themes/cotton_candy/card3.png',
+        'assets/themes/cotton_candy/card4.png',
+        'assets/themes/cotton_candy/card5.png',
+      ],
+    ),
     colors: GtColors(
       surface: Color(0xFFFFF0F6),
       surfaceRaised: Color(0xFFFFFAFC),
@@ -286,6 +320,21 @@ const List<GtTheme> gtThemes = [
       Color(0xFF2196F3),
       Color(0xFF8E44AD),
     ],
+    art: GtThemeArt(
+      ambient: [
+        'assets/themes/queer_joy/ambient1.png',
+        'assets/themes/queer_joy/ambient2.png',
+        'assets/themes/queer_joy/ambient3.png',
+      ],
+      cards: [
+        'assets/themes/queer_joy/card1.png',
+        'assets/themes/queer_joy/card2.png',
+        'assets/themes/queer_joy/card3.png',
+        'assets/themes/queer_joy/card4.png',
+        'assets/themes/queer_joy/card5.png',
+        'assets/themes/queer_joy/card6.png',
+      ],
+    ),
     colors: GtColors(
       surface: Color(0xFFFFF4EC),
       surfaceRaised: Color(0xFFFFFBF6),
@@ -315,6 +364,21 @@ const List<GtTheme> gtThemes = [
     emoji: '🌙',
     brightness: Brightness.dark,
     swatches: [Color(0xFF3B2E7E), Color(0xFFB79BEA), Color(0xFFF4C6D9)],
+    art: GtThemeArt(
+      ambient: [
+        'assets/themes/indigo_nights/ambient1.png',
+        'assets/themes/indigo_nights/ambient2.png',
+        'assets/themes/indigo_nights/ambient3.png',
+        'assets/themes/indigo_nights/ambient4.png',
+      ],
+      cards: [
+        'assets/themes/indigo_nights/card1.png',
+        'assets/themes/indigo_nights/card2.png',
+        'assets/themes/indigo_nights/card3.png',
+        'assets/themes/indigo_nights/card4.png',
+        'assets/themes/indigo_nights/card5.png',
+      ],
+    ),
     colors: GtColors(
       surface: Color(0xFF1A1640),
       surfaceRaised: Color(0xFF262051),
