@@ -69,32 +69,22 @@ class GirlTeaWordmark extends StatelessWidget {
 }
 
 // ============================================================
-// Theme controller — "Display Mode" (light / dark / system)
+// Theme controller — the member's chosen app-wide theme
 // ============================================================
-// The profile menu lets you switch display mode; we persist the choice in
-// the browser so it survives a refresh. A global ChangeNotifier drives
-// MaterialApp.router's themeMode.
+// The profile menu lets you pick a vibe (Cotton Candy, Indigo Nights, …);
+// we persist the choice in the browser so it survives a refresh. A global
+// ChangeNotifier drives MaterialApp.router's theme. Each theme carries its own
+// brightness, so the two dark themes replace the old light/dark toggle.
 class ThemeController extends ChangeNotifier {
-  ThemeMode _mode = _readStored();
-  ThemeMode get mode => _mode;
+  GtTheme _theme = gtThemeByName(html.window.localStorage[_storageKey]);
+  GtTheme get theme => _theme;
 
-  static const _storageKey = 'girltea_display_mode';
+  static const _storageKey = 'girltea_theme';
 
-  static ThemeMode _readStored() {
-    switch (html.window.localStorage[_storageKey]) {
-      case 'light':
-        return ThemeMode.light;
-      case 'dark':
-        return ThemeMode.dark;
-      default:
-        return ThemeMode.system;
-    }
-  }
-
-  void set(ThemeMode mode) {
-    if (mode == _mode) return;
-    _mode = mode;
-    html.window.localStorage[_storageKey] = mode.name;
+  void set(GtThemeId id) {
+    if (id == _theme.id) return;
+    _theme = gtThemeByName(id.name);
+    html.window.localStorage[_storageKey] = id.name;
     notifyListeners();
   }
 }
@@ -684,9 +674,8 @@ class _SignedAudioState extends State<SignedAudio> {
 /// is themed from the same semantic [GtColors], so generic Material chrome
 /// disappears and dark mode is a pure token swap. Read colours at call-sites
 /// via `context.gt.*`, never inline hex.
-ThemeData _buildTheme(Brightness brightness) {
+ThemeData _buildTheme(GtColors gt, Brightness brightness) {
   final isLight = brightness == Brightness.light;
-  final gt = isLight ? GtColors.light : GtColors.dark;
 
   final scheme = ColorScheme(
     brightness: brightness,
@@ -869,21 +858,27 @@ class GirlTeaApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild the whole app when Display Mode changes.
+    // Rebuild the whole app when the chosen theme changes. Each theme carries
+    // its own brightness, so we build one ThemeData from it and pin themeMode
+    // to that brightness (theme == darkTheme keeps either mode identical).
     return AnimatedBuilder(
       animation: themeController,
-      builder: (context, _) => MaterialApp.router(
-        title: 'GirlTea',
-        debugShowCheckedModeBanner: false,
-        theme: _buildTheme(Brightness.light),
-        darkTheme: _buildTheme(Brightness.dark),
-        themeMode: themeController.mode,
-        routerConfig: _router,
-        // Shared groups cache lives above every route so the shell and panes
-        // can read/resolve slugs from one place.
-        builder: (context, child) =>
-            GroupsScope(child: child ?? const SizedBox()),
-      ),
+      builder: (context, _) {
+        final t = themeController.theme;
+        final built = _buildTheme(t.colors, t.brightness);
+        return MaterialApp.router(
+          title: 'GirlTea',
+          debugShowCheckedModeBanner: false,
+          theme: built,
+          darkTheme: built,
+          themeMode: t.isDark ? ThemeMode.dark : ThemeMode.light,
+          routerConfig: _router,
+          // Shared groups cache lives above every route so the shell and panes
+          // can read/resolve slugs from one place.
+          builder: (context, child) =>
+              GroupsScope(child: child ?? const SizedBox()),
+        );
+      },
     );
   }
 }
@@ -922,20 +917,43 @@ class _AuthRefresh extends ChangeNotifier {
 
 final _authRefresh = _AuthRefresh();
 
+/// Stashes an invite token while a signed-out visitor is bounced through
+/// login/onboarding, so opening `/join/<token>` still lands them on the right
+/// circle once they have an account.
+const _pendingInviteKey = 'girltea_pending_invite';
+
 final _router = GoRouter(
   initialLocation: '/home',
   refreshListenable: _authRefresh,
   redirect: (context, state) {
     final signedIn = supabase.auth.currentSession != null;
-    final atLogin = state.matchedLocation == '/login';
-    if (!signedIn) return atLogin ? null : '/login';
-    if (atLogin) return '/home';
+    final path = state.uri.path;
+    final atLogin = path == '/login';
+    final atJoin = path.startsWith('/join/');
+    if (!signedIn) {
+      // Remember the invite so we can resume after they sign in / onboard.
+      if (atJoin) {
+        html.window.localStorage[_pendingInviteKey] =
+            path.substring('/join/'.length);
+      }
+      return atLogin ? null : '/login';
+    }
+    if (atLogin) {
+      final pending = html.window.localStorage[_pendingInviteKey];
+      if (pending != null && pending.isNotEmpty) return '/join/$pending';
+      return '/home';
+    }
     return null;
   },
   routes: [
     GoRoute(
       path: '/login',
       builder: (context, state) => const LoginScreen(),
+    ),
+    GoRoute(
+      path: '/join/:token',
+      builder: (context, state) =>
+          InviteLandingScreen(token: state.pathParameters['token']!),
     ),
     ShellRoute(
       builder: (context, state, child) => HomeShell(state: state, child: child),
@@ -1197,7 +1215,7 @@ class _HomeShellState extends State<HomeShell> {
 // A single global bar across every signed-in screen. Tapping the brand goes
 // home; the centered Spill button composes into the current circle (disabled
 // on /home where there's no circle context); the right-corner avatar opens a
-// Reddit-style menu: View Profile, Display Mode, Log Out.
+// Reddit-style menu: View Profile, Theme, Log Out.
 class _TopBar extends StatelessWidget implements PreferredSizeWidget {
   const _TopBar({required this.currentSlug, this.dense = false});
 
@@ -1253,7 +1271,7 @@ class _TopBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-/// The right-corner avatar + dropdown: View Profile, Display Mode, Log Out.
+/// The right-corner avatar + dropdown: View Profile, Theme, Log Out.
 class _ProfileMenu extends StatelessWidget {
   const _ProfileMenu({required this.displayName});
 
@@ -1273,7 +1291,7 @@ class _ProfileMenu extends StatelessWidget {
           case 'profile':
             context.go('/me');
           case 'display':
-            _showDisplayModeSheet(context);
+            _showThemeSheet(context);
           case 'logout':
             supabase.auth.signOut();
         }
@@ -1297,8 +1315,8 @@ class _ProfileMenu extends StatelessWidget {
           value: 'display',
           child: ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.brightness_6_outlined),
-            title: Text('Display Mode'),
+            leading: Icon(Icons.palette_outlined),
+            title: Text('Theme'),
           ),
         ),
         const PopupMenuItem(
@@ -1324,46 +1342,138 @@ class _ProfileMenu extends StatelessWidget {
   }
 }
 
-/// Bottom sheet to pick Light / Dark / System display mode.
-void _showDisplayModeSheet(BuildContext context) {
+/// Bottom sheet to pick the app-wide theme ("be you, here"). Each row is a
+/// full vibe: emoji + name + tagline + a preview of the palette. Tapping one
+/// applies it immediately and persists the choice.
+void _showThemeSheet(BuildContext context) {
   showModalBottomSheet<void>(
     context: context,
+    isScrollControlled: true,
     builder: (sheetContext) {
       return AnimatedBuilder(
         animation: themeController,
         builder: (context, _) {
-          Widget tile(String label, IconData icon, ThemeMode mode) {
-            return RadioListTile<ThemeMode>(
-              value: mode,
-              groupValue: themeController.mode,
-              onChanged: (m) {
-                if (m != null) themeController.set(m);
-                Navigator.of(sheetContext).pop();
-              },
-              secondary: Icon(icon),
-              title: Text(label),
+          final gt = context.gt;
+          final selectedId = themeController.theme.id;
+
+          Widget swatchRow(GtTheme theme) => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final c in theme.swatches)
+                    Container(
+                      width: 16,
+                      height: 16,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        color: c,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: gt.hairline),
+                      ),
+                    ),
+                ],
+              );
+
+          Widget card(GtTheme theme) {
+            final selected = theme.id == selectedId;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  GtSpace.lg, 0, GtSpace.lg, GtSpace.sm),
+              child: Material(
+                color: selected ? gt.accentSoft : gt.surfaceRaised,
+                borderRadius: GtRadii.all(GtRadii.lg),
+                child: InkWell(
+                  borderRadius: GtRadii.all(GtRadii.lg),
+                  onTap: () {
+                    themeController.set(theme.id);
+                    Navigator.of(sheetContext).pop();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(GtSpace.md),
+                    decoration: BoxDecoration(
+                      borderRadius: GtRadii.all(GtRadii.lg),
+                      border: Border.all(
+                        color: selected ? gt.accent : gt.hairline,
+                        width: selected ? 1.6 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(theme.emoji,
+                            style: const TextStyle(fontSize: 22)),
+                        const SizedBox(width: GtSpace.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(theme.name,
+                                      style: GtText.titleUi(color: gt.onSurface)),
+                                  if (theme.isDark) ...[
+                                    const SizedBox(width: GtSpace.sm),
+                                    Icon(Icons.dark_mode_outlined,
+                                        size: 14, color: gt.onSurfaceFaint),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(theme.tagline,
+                                  style: GtText.bodySm(
+                                      color: gt.onSurfaceMuted)),
+                              const SizedBox(height: GtSpace.sm),
+                              swatchRow(theme),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: GtSpace.sm),
+                        Icon(
+                          selected
+                              ? Icons.check_circle
+                              : Icons.circle_outlined,
+                          color: selected ? gt.accent : gt.onSurfaceFaint,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             );
           }
 
           return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Display Mode',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.8,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        GtSpace.xl, GtSpace.lg, GtSpace.xl, GtSpace.xs),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Theme',
+                              style: GtText.title(color: gt.onSurface)),
+                          Text('Different vibes, same safe space. Be you, here.',
+                              style: GtText.bodySm(color: gt.onSurfaceMuted)),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-                tile('Light', Icons.light_mode_outlined, ThemeMode.light),
-                tile('Dark', Icons.dark_mode_outlined, ThemeMode.dark),
-                tile('System', Icons.brightness_auto_outlined,
-                    ThemeMode.system),
-                const SizedBox(height: 8),
-              ],
+                  const SizedBox(height: GtSpace.sm),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [for (final t in gtThemes) card(t)],
+                    ),
+                  ),
+                  const SizedBox(height: GtSpace.sm),
+                ],
+              ),
             ),
           );
         },
@@ -1598,7 +1708,7 @@ class _NotFoundPane extends StatelessWidget {
 // /me — your profile
 // ============================================================
 // Reads fn_my_profile() and shows the account's display name + basics, plus
-// entry points for Display Mode and (destructive) account deletion. Renders
+// entry points for Theme and (destructive) account deletion. Renders
 // inside the shell chrome (the global top bar sits above it).
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -1694,10 +1804,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             const SizedBox(height: 12),
             _profileTile(
-              icon: Icons.brightness_6_outlined,
-              title: 'Display Mode',
-              subtitle: _modeLabel(themeController.mode),
-              onTap: () => _showDisplayModeSheet(context),
+              icon: Icons.palette_outlined,
+              title: 'Theme',
+              subtitle:
+                  '${themeController.theme.emoji}  ${themeController.theme.name}',
+              onTap: () => _showThemeSheet(context),
             ),
             _profileTile(
               icon: Icons.logout,
@@ -1718,12 +1829,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
-
-  static String _modeLabel(ThemeMode m) => switch (m) {
-        ThemeMode.light => 'Light',
-        ThemeMode.dark => 'Dark',
-        ThemeMode.system => 'System',
-      };
 
   /// Friendly label for a stored gender enum. Falls back to a title-cased
   /// version of the raw enum for values not in [_genderOptions], and shows
@@ -2991,6 +3096,7 @@ class _FeedScreenState extends State<FeedScreen> {
   Object? _error;
   String? _myAlias; // this user's anonymized alias in this group
   bool _isModerator = false; // OWNER/ADMIN of this group
+  int _pendingCount = 0; // join requests in this circle awaiting my vote
   final Set<String> _myUpvotes = {}; // post ids I've upvoted
 
   @override
@@ -3000,6 +3106,7 @@ class _FeedScreenState extends State<FeedScreen> {
     _loadMyAlias();
     _loadMyUpvotes();
     _loadModeratorStatus();
+    _loadPendingCount();
     // Reload when a post is spilled from the global top-bar button.
     feedRefresh.addListener(_onFeedRefresh);
   }
@@ -3021,6 +3128,69 @@ class _FeedScreenState extends State<FeedScreen> {
     } catch (_) {
       // Non-fatal: just don't show the moderator affordance.
     }
+  }
+
+  Future<void> _loadPendingCount() async {
+    // How many join requests in THIS circle are waiting on my vote — powers
+    // the badge on the "Requests" action. The RPC returns pending requests
+    // across all my circles, so filter to this group.
+    try {
+      final rows = await supabase.rpc('fn_pending_join_requests_for_me');
+      if (rows is List && mounted) {
+        final n = rows
+            .where((r) => r['group_id'] == widget.groupId)
+            .length;
+        setState(() => _pendingCount = n);
+      }
+    } catch (_) {
+      // Non-fatal: just don't badge the action.
+    }
+  }
+
+  Future<void> _openInvite() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => InviteSheet(
+        groupId: widget.groupId,
+        groupName: widget.groupName,
+      ),
+    );
+  }
+
+  Future<void> _openRequests() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => JoinRequestsScreen(
+          groupId: widget.groupId,
+          groupName: widget.groupName,
+        ),
+      ),
+    );
+    // Votes may have resolved requests — refresh the badge on return.
+    _loadPendingCount();
+  }
+
+  // Invite + Requests actions, available to ANY member. [color] is null in the
+  // AppBar (inherits onAccent) and the circle accent in the desktop pane.
+  List<Widget> _memberActions(Color? color) {
+    return [
+      IconButton(
+        tooltip: 'Invite to this circle',
+        icon: Icon(Icons.person_add_alt_1_outlined, color: color),
+        onPressed: _openInvite,
+      ),
+      IconButton(
+        tooltip: 'Join requests',
+        icon: Badge.count(
+          count: _pendingCount,
+          isLabelVisible: _pendingCount > 0,
+          child: Icon(Icons.how_to_reg_outlined, color: color),
+        ),
+        onPressed: _openRequests,
+      ),
+    ];
   }
 
   Future<void> _loadPosts() async {
@@ -3381,6 +3551,7 @@ class _FeedScreenState extends State<FeedScreen> {
                         fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
+                ..._memberActions(context.gt.accent),
                 if (_isModerator)
                   IconButton(
                     tooltip: 'Moderation queue',
@@ -3407,6 +3578,7 @@ class _FeedScreenState extends State<FeedScreen> {
         foregroundColor: context.gt.onAccent,
         title: Text(widget.groupName),
         actions: [
+          ..._memberActions(null),
           if (_isModerator)
             IconButton(
               tooltip: 'Moderation queue',
@@ -3471,6 +3643,621 @@ class _PostMenu extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+// ============================================================
+// Invites — mint a link, land on it, and vote in new members
+// ============================================================
+// Any active member can mint a shareable link (fn_create_invite). Opening the
+// link (/join/:token) resolves safe metadata and, on "Join", files a request
+// that admits the person only after 2 members approve (fn_cast_join_vote).
+
+/// Bottom sheet that mints an invite link and lets a member copy/share it.
+class InviteSheet extends StatefulWidget {
+  const InviteSheet({super.key, required this.groupId, required this.groupName});
+
+  final String groupId;
+  final String groupName;
+
+  @override
+  State<InviteSheet> createState() => _InviteSheetState();
+}
+
+class _InviteSheetState extends State<InviteSheet> {
+  String? _link; // null until minted
+  Object? _error;
+  bool _copied = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mint();
+  }
+
+  Future<void> _mint() async {
+    try {
+      final token = await supabase.rpc('fn_create_invite', params: {
+        'p_group_id': widget.groupId,
+      });
+      final origin = html.window.location.origin;
+      if (mounted) setState(() => _link = '$origin/join/$token');
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
+  }
+
+  Future<void> _copy() async {
+    final link = _link;
+    if (link == null) return;
+    try {
+      await html.window.navigator.clipboard?.writeText(link);
+      if (mounted) setState(() => _copied = true);
+    } catch (_) {
+      // Clipboard can be blocked; the link is still selectable above.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gt = context.gt;
+    return Container(
+      decoration: BoxDecoration(
+        color: gt.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+          24, 20, 24, 24 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: gt.hairline,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text('Invite to ${widget.groupName}', style: _headerFont(size: 22)),
+          const SizedBox(height: 6),
+          Text(
+            'Share this link with your girls. Whoever opens it asks to join — '
+            'and gets in once 2 members of this circle approve. ☕',
+            style: TextStyle(
+                color: gt.onSurfaceMuted, fontSize: 14, height: 1.4),
+          ),
+          const SizedBox(height: 20),
+          if (_error != null)
+            Text('Could not create a link: $_error',
+                style: TextStyle(color: gt.danger))
+          else if (_link == null)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: gt.surfaceSunken,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: gt.hairline),
+              ),
+              child: SelectableText(
+                _link!,
+                maxLines: 1,
+                style: TextStyle(color: gt.onSurface, fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: gt.accent,
+                  foregroundColor: gt.onAccent,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: _copy,
+                icon: Icon(_copied ? Icons.check : Icons.copy, size: 18),
+                label: Text(_copied ? 'Link copied' : 'Copy link'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// /join/:token — the landing a friend sees when they open an invite link.
+/// Requires an account with a profile; the router preserves the token through
+/// login, and this gates on onboarding before resolving.
+class InviteLandingScreen extends StatelessWidget {
+  const InviteLandingScreen({super.key, required this.token});
+
+  final String token;
+
+  @override
+  Widget build(BuildContext context) {
+    final gc = GroupsScope.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const GirlTeaWordmark(fontSize: 20),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Not now',
+          onPressed: () => context.go('/home'),
+        ),
+      ),
+      body: Builder(builder: (context) {
+        if (!gc.profileLoaded) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        // Brand-new account: they must finish their profile before joining.
+        // Onboarding flips hasProfile and this rebuilds into the invite card.
+        if (!gc.hasProfile) return const _OnboardingPane();
+        return _InviteResolver(token: token);
+      }),
+    );
+  }
+}
+
+class _InviteResolver extends StatefulWidget {
+  const _InviteResolver({required this.token});
+
+  final String token;
+
+  @override
+  State<_InviteResolver> createState() => _InviteResolverState();
+}
+
+class _InviteResolverState extends State<_InviteResolver> {
+  Map<String, dynamic>? _invite; // resolved metadata
+  Object? _error;
+  bool _joining = false;
+  bool _submitted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  Future<void> _resolve() async {
+    try {
+      final rows = await supabase
+          .rpc('fn_resolve_invite', params: {'p_token': widget.token});
+      if (mounted) {
+        setState(() {
+          _invite = (rows as List).isEmpty
+              ? null
+              : (rows.first as Map).cast<String, dynamic>();
+          if (_invite == null) _error = 'This circle is no longer available.';
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
+  }
+
+  Future<void> _join() async {
+    final inv = _invite;
+    if (inv == null) return;
+    setState(() => _joining = true);
+    try {
+      await supabase.rpc('fn_submit_join_request', params: {
+        'p_group_id': inv['group_id'],
+        'p_token': widget.token,
+      });
+      // Consumed — don't let the router bounce back here later.
+      html.window.localStorage.remove(_pendingInviteKey);
+      if (mounted) setState(() => _submitted = true);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _joining = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not send your request: $e')),
+        );
+      }
+    }
+  }
+
+  void _openCircle(String groupId) {
+    html.window.localStorage.remove(_pendingInviteKey);
+    // We only have the group id here; jump into it by slug if we know it.
+    for (final g in groupsController.groups ?? const []) {
+      if (g['id'] == groupId) {
+        context.go('/${g['slug']}');
+        return;
+      }
+    }
+    context.go('/home');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gt = context.gt;
+    if (_error != null) {
+      return _InviteMessage(
+        emoji: '🚪',
+        title: 'This link didn\'t work',
+        body: '$_error',
+        actionLabel: 'Go to your circles',
+        onAction: () => context.go('/home'),
+      );
+    }
+    final inv = _invite;
+    if (inv == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final name = inv['name'] as String? ?? 'A circle';
+    final inviter = inv['inviter_name'] as String?;
+    final memberCount = inv['member_count'] as int? ?? 0;
+    final description = inv['description'] as String?;
+
+    if (inv['already_member'] == true) {
+      return _InviteMessage(
+        emoji: '💕',
+        title: 'You\'re already in $name',
+        body: 'Your seat is warm. Head in and see what\'s brewing.',
+        actionLabel: 'Open circle',
+        onAction: () => _openCircle(inv['group_id'] as String),
+      );
+    }
+
+    if (_submitted || inv['has_pending_request'] == true) {
+      return _InviteMessage(
+        emoji: '⏳',
+        title: 'Waiting on your girls',
+        body:
+            'Your request to join $name is in. You\'re in as soon as 2 members '
+            'say yes.',
+        actionLabel: 'Go to your circles',
+        onAction: () => context.go('/home'),
+      );
+    }
+
+    // The invite card.
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('☕', style: TextStyle(fontSize: 48)),
+              const SizedBox(height: 16),
+              Text(
+                inviter != null && inviter.isNotEmpty
+                    ? '$inviter saved you a seat'
+                    : 'You\'re invited',
+                textAlign: TextAlign.center,
+                style: _headerFont(size: 26),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: gt.surfaceRaised,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: gt.hairline),
+                ),
+                child: Column(
+                  children: [
+                    Text(name,
+                        textAlign: TextAlign.center,
+                        style: _headerFont(size: 22)),
+                    const SizedBox(height: 8),
+                    if (description != null && description.isNotEmpty) ...[
+                      Text(description,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: gt.onSurfaceMuted, height: 1.4)),
+                      const SizedBox(height: 12),
+                    ],
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.lock_outline,
+                            size: 15, color: gt.onSurfaceFaint),
+                        const SizedBox(width: 6),
+                        Text(
+                          '$memberCount ${memberCount == 1 ? 'girl' : 'girls'} · private circle',
+                          style: TextStyle(
+                              color: gt.onSurfaceFaint, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '2 members will need to approve before you\'re in.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: gt.onSurfaceFaint, fontSize: 13),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: gt.accent,
+                    foregroundColor: gt.onAccent,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  onPressed: _joining ? null : _join,
+                  child: _joining
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Join your girls'),
+                ),
+              ),
+              TextButton(
+                onPressed: () => context.go('/home'),
+                child: const Text('Not now'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A simple centered emoji + title + body + one action, for invite end-states.
+class _InviteMessage extends StatelessWidget {
+  const _InviteMessage({
+    required this.emoji,
+    required this.title,
+    required this.body,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  final String emoji;
+  final String title;
+  final String body;
+  final String actionLabel;
+  final VoidCallback onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final gt = context.gt;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 44)),
+              const SizedBox(height: 14),
+              Text(title, textAlign: TextAlign.center, style: _headerFont(size: 24)),
+              const SizedBox(height: 8),
+              Text(body,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: gt.onSurfaceMuted, height: 1.4)),
+              const SizedBox(height: 22),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: gt.accent,
+                  foregroundColor: gt.onAccent,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+                onPressed: onAction,
+                child: Text(actionLabel),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The member-facing list of people asking to join this circle, with the
+/// Approve / Reject votes that drive the 2-approval quorum (fn_cast_join_vote).
+class JoinRequestsScreen extends StatefulWidget {
+  const JoinRequestsScreen(
+      {super.key, required this.groupId, required this.groupName});
+
+  final String groupId;
+  final String groupName;
+
+  @override
+  State<JoinRequestsScreen> createState() => _JoinRequestsScreenState();
+}
+
+class _JoinRequestsScreenState extends State<JoinRequestsScreen> {
+  List<Map<String, dynamic>>? _requests; // null = loading
+  Object? _error;
+  final Set<String> _voting = {}; // request ids with a vote in flight
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final rows = await supabase.rpc('fn_pending_join_requests_for_me');
+      if (mounted) {
+        setState(() {
+          _requests = (rows as List)
+              .cast<Map<String, dynamic>>()
+              .where((r) => r['group_id'] == widget.groupId)
+              .toList();
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
+  }
+
+  Future<void> _vote(Map<String, dynamic> req, bool approve) async {
+    final id = req['id'] as String;
+    setState(() => _voting.add(id));
+    try {
+      await supabase.rpc('fn_cast_join_vote', params: {
+        'p_join_request_id': id,
+        'p_vote': approve ? 'APPROVE' : 'REJECT',
+      });
+      // Drop it from the list — it's resolved for me either way.
+      if (mounted) {
+        setState(() {
+          _requests = _requests?.where((r) => r['id'] != id).toList();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(approve ? 'You said yes ☕' : 'Request declined')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not record your vote: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _voting.remove(id));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gt = context.gt;
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: gt.accent,
+        foregroundColor: gt.onAccent,
+        title: const Text('Join requests'),
+      ),
+      body: Builder(builder: (context) {
+        if (_error != null) {
+          return Center(child: Text('Error: $_error'));
+        }
+        final reqs = _requests;
+        if (reqs == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (reqs.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Text(
+                'No one\'s knocking right now.\nInvite your girls to ${widget.groupName}. ☕',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: gt.onSurfaceMuted, height: 1.5),
+              ),
+            ),
+          );
+        }
+        return RefreshIndicator(
+          onRefresh: _load,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 620),
+              child: ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: reqs.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, i) => _requestCard(reqs[i]),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _requestCard(Map<String, dynamic> req) {
+    final gt = context.gt;
+    final id = req['id'] as String;
+    final approvals = (req['approval_count'] as num?)?.toInt() ?? 0;
+    final quorum = (req['quorum'] as num?)?.toInt() ?? 2;
+    final iHaveVoted = req['i_have_voted'] == true;
+    final iCanVote = req['i_can_vote'] == true;
+    final busy = _voting.contains(id);
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: gt.surfaceRaised,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: gt.hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.person_outline, color: gt.accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Someone wants to join',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, color: gt.onSurface),
+                ),
+              ),
+              Text('$approvals of $quorum',
+                  style: TextStyle(color: gt.onSurfaceMuted, fontSize: 13)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (iHaveVoted)
+            Text('You\'ve voted — waiting on the others.',
+                style: TextStyle(color: gt.onSurfaceFaint, fontSize: 13))
+          else if (!iCanVote)
+            Text('You can\'t vote on this one.',
+                style: TextStyle(color: gt.onSurfaceFaint, fontSize: 13))
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: busy ? null : () => _vote(req, false),
+                    child: const Text('Decline'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: gt.accent,
+                      foregroundColor: gt.onAccent,
+                    ),
+                    onPressed: busy ? null : () => _vote(req, true),
+                    child: busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Approve'),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }
