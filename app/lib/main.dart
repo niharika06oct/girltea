@@ -107,10 +107,22 @@ final themeController = ThemeController();
 /// their Scaffold a transparent background. Picks one image from the active
 /// theme's ambient pool per mount — so revisiting a screen rotates the art.
 class ThemedBackdrop extends StatefulWidget {
-  const ThemedBackdrop({super.key, required this.child, this.opacity = 0.30});
+  const ThemedBackdrop({super.key, required this.child, this.opacity = 0.30})
+      : scrim = const [0.74, 0.52, 0.80];
+
+  /// Tuned for content-heavy screens (populated feed, circle list): the
+  /// wallpaper only peeks through the gutters around opaque cards, so it can
+  /// stay a touch fainter under a stronger, more even scrim and never fight
+  /// the text sitting on the cards above it.
+  const ThemedBackdrop.behindContent({super.key, required this.child})
+      : opacity = 0.22,
+        scrim = const [0.82, 0.70, 0.86];
 
   final Widget child;
   final double opacity;
+
+  /// Surface-scrim alphas for [top, middle, bottom] of the vertical gradient.
+  final List<double> scrim;
 
   @override
   State<ThemedBackdrop> createState() => _ThemedBackdropState();
@@ -152,9 +164,9 @@ class _ThemedBackdropState extends State<ThemedBackdrop> {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        gt.surface.withValues(alpha: 0.74),
-                        gt.surface.withValues(alpha: 0.52),
-                        gt.surface.withValues(alpha: 0.80),
+                        gt.surface.withValues(alpha: widget.scrim[0]),
+                        gt.surface.withValues(alpha: widget.scrim[1]),
+                        gt.surface.withValues(alpha: widget.scrim[2]),
                       ],
                       stops: const [0.0, 0.5, 1.0],
                     ),
@@ -173,28 +185,40 @@ class _ThemedBackdropState extends State<ThemedBackdrop> {
 /// A themed quote wallpaper shown whole (framed, soft-shadowed) as hero art in
 /// an empty state. Renders nothing on themes without art. [seed] keeps the
 /// pick stable for a given context (e.g. a circle id) so it doesn't flicker.
+///
+/// The cards are portrait (~2:3), so they're sized by [maxHeight] with
+/// [maxWidth] as a ceiling — scaling up to fill roomy desktop panes while
+/// staying tasteful on a phone. Pass a height derived from the available space.
 class ThemedQuoteCard extends StatelessWidget {
-  const ThemedQuoteCard({super.key, this.seed = 0, this.width = 260});
+  const ThemedQuoteCard({
+    super.key,
+    this.seed = 0,
+    this.maxHeight = 420,
+    this.maxWidth = 340,
+  });
 
   final int seed;
-  final double width;
+  final double maxHeight;
+  final double maxWidth;
 
   @override
   Widget build(BuildContext context) {
     final art = themeController.theme.art;
     if (art == null || art.cards.isEmpty) return const SizedBox.shrink();
     final asset = art.cards[seed.abs() % art.cards.length];
-    return Container(
-      width: width,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: GtRadii.organic(base: GtRadii.lg),
-        boxShadow: GtShadow.soft(Theme.of(context).brightness),
-      ),
-      child: Image.asset(
-        asset,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: maxWidth),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: GtRadii.organic(base: GtRadii.lg),
+          boxShadow: GtShadow.soft(Theme.of(context).brightness),
+        ),
+        child: Image.asset(
+          asset,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        ),
       ),
     );
   }
@@ -2395,7 +2419,8 @@ class _CirclesOverview extends StatelessWidget {
     if (list.isEmpty) {
       return _EmptyCirclesState(displayName: displayName);
     }
-    return Center(
+    return ThemedBackdrop.behindContent(
+      child: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760),
         child: ListView(
@@ -2471,6 +2496,7 @@ class _CirclesOverview extends StatelessWidget {
             _RecentSpills(groups: list, onOpen: onOpen),
           ],
         ),
+      ),
       ),
     );
   }
@@ -2696,8 +2722,6 @@ class _EmptyCirclesState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // On themes with art, lead with a quote wallpaper instead of the emoji.
-    final hasArt = themeController.theme.art?.cards.isNotEmpty ?? false;
     return ThemedBackdrop(
       child: Center(
         child: SingleChildScrollView(
@@ -2708,10 +2732,7 @@ class _EmptyCirclesState extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (hasArt)
-                    const ThemedQuoteCard(seed: 0, width: 240)
-                  else
-                    const Text('🌸', style: TextStyle(fontSize: 56)),
+                  const Text('🌸', style: TextStyle(fontSize: 56)),
                   const SizedBox(height: 20),
                   Text(
                     displayName == null
@@ -3515,49 +3536,51 @@ class _FeedScreenState extends State<FeedScreen> {
     }
     if (posts.isEmpty) {
       return LayoutBuilder(
-        builder: (context, constraints) => RefreshIndicator(
-          onRefresh: _loadPosts,
-          child: ListView(
-            children: [
-              SizedBox(
-                height: constraints.maxHeight,
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Themed quote wallpaper (seeded per-circle so each room
-                      // shows a different one); nothing on themes without art.
-                      ThemedQuoteCard(
-                        seed: widget.groupId.hashCode,
-                        width: 220,
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        'No tea yet. Be the first to spill ☕',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: context.gt.onSurfaceMuted),
-                      ),
-                    ],
+        builder: (context, constraints) => ThemedBackdrop(
+          child: RefreshIndicator(
+            onRefresh: _loadPosts,
+            child: ListView(
+              children: [
+                SizedBox(
+                  height: constraints.maxHeight,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('☕', style: TextStyle(fontSize: 48)),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No tea yet. Be the first to spill ☕',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: context.gt.onSurfaceMuted),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
     }
-    return RefreshIndicator(
-      onRefresh: _loadPosts,
-      // Center the column of cards and cap its width so the feed stays
-      // readable on a wide desktop pane (Reddit does the same).
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            itemCount: posts.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, i) => _postCard(posts[i]),
+    // The posts themselves sit on opaque cards, so the theme wallpaper only
+    // shows through the side gutters — enough to make a busy circle feel like
+    // its own room without ever touching legibility.
+    return ThemedBackdrop.behindContent(
+      child: RefreshIndicator(
+        onRefresh: _loadPosts,
+        // Center the column of cards and cap its width so the feed stays
+        // readable on a wide desktop pane (Reddit does the same).
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 620),
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              itemCount: posts.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, i) => _postCard(posts[i]),
+            ),
           ),
         ),
       ),
