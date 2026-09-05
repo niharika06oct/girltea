@@ -19,12 +19,36 @@ about life — in trusted, closed groups with real approval flows.
   more approves)
 - Everything is backed by PostgreSQL with Supabase for auth, storage, and RLS
 
+## The Web App & Design System
+
+The client is a Flutter web app (single file `app/lib/main.dart`) deployed to
+**[girltea.onrender.com](https://girltea.onrender.com)** — Render builds the
+container from `app/Dockerfile` and auto-deploys on every push to `main`.
+
+The look is driven by a small design system in `app/lib/design/`, not ad-hoc
+styling:
+
+- **Tokens** (`tokens.dart`) — semantic color roles (`surface`, `onSurface`,
+  `accent`, `hairline`, …) exposed via a `GtColors` theme extension, plus
+  spacing, radii, soft shadows, and motion tokens. Reading colors by role (not
+  raw hex) is what makes light/dark a token swap rather than a rewrite.
+- **Type** (`type.dart`) — Playfair Display for editorial/emotional headings,
+  Inter for UI/body.
+- **8 named themes** — Cotton Candy, Queer Joy, Indigo Nights, Sage Space,
+  Sunset Drive, Lavender Haze, Cherry Kiss (default), Noir Club. Chosen from the
+  top-bar menu; `ThemeController` persists the pick to `localStorage`.
+- **Per-theme background art** — three themes (Cotton Candy, Queer Joy, Indigo
+  Nights) carry aesthetic wallpapers (`app/assets/themes/`). A `ThemedBackdrop`
+  paints a faded, scrimmed wallpaper behind six screens (login, onboarding, the
+  two empty states, the circle-list home, and active feeds); the other themes
+  render plain. Art is optional per theme (`GtThemeArt`).
+
 ## Project Structure
 
 ```
 girltea/
 ├── README.md                          ← You are here
-├── schema/                            ← PostgreSQL data model (21 SQL files)
+├── schema/                            ← PostgreSQL data model (29 SQL files)
 │   ├── 001_enums.sql                  ← All enum types
 │   ├── 002_users.sql                  ← User profiles
 │   ├── 003_groups.sql                 ← Groups with policy/visibility/settings
@@ -49,6 +73,11 @@ girltea/
 │   ├── 022_moderation.sql             ← Moderation queue + actions
 │   ├── 023_erasure.sql                ← Right-to-erasure purge path (DPDP/GDPR)
 │   ├── 024_group_slugs.sql            ← Readable group slugs for URLs (/college-girls)
+│   ├── 025_circle_identity.sql        ← groups.emoji/accent_color/cover_image_url + extended create RPC
+│   ├── 026_saved_posts.sql            ← "Memories" — save a post to a personal keepsake archive
+│   ├── 027_post_reactions.sql         ← Rich reactions (LOVE/HUG/CRY/LAUGH/TEA/SPARK) over the binary upvote
+│   ├── 028_invite_inviter_name.sql    ← fn_resolve_invite returns the inviter's display name
+│   ├── 029_create_invite.sql          ← fn_create_invite: any active member mints a shareable link
 │   ├── DESIGN.md                      ← Design decisions, flow diagrams, matrices
 │   ├── schema-diagram.png             ← ER diagram (high-res)
 │   ├── schema-diagram.svg             ← ER diagram (scalable)
@@ -64,8 +93,15 @@ girltea/
 │   ├── STORAGE.md                     ← Storage architecture + setup guide
 │   └── QUERIES.md                     ← Complete query reference for Flutter app
 ├── app/                               ← Flutter web client (see app/README.md)
+│   ├── lib/main.dart                  ← The app (single-file): auth, feeds, composer, moderation
+│   ├── lib/design/tokens.dart         ← Design system: color/spacing/radii/shadow tokens, 8 themes, wallpaper art
+│   ├── lib/design/type.dart           ← Type scale (Playfair Display + Inter)
+│   ├── assets/themes/                 ← Per-theme background art (Cotton Candy / Queer Joy / Indigo Nights)
+│   └── Dockerfile                     ← Container build served on Render
+├── render.yaml                        ← Render deploy config (auto-deploys from main)
 └── scripts/
-    └── dev-code.sh                    ← Prints an instant sign-in OTP for local dev
+    ├── dev-code.sh                    ← Prints an instant sign-in code for the LOCAL Supabase stack
+    └── cloud-code.sh                  ← Same, but against the live Cloud project (needs service_role)
 ```
 
 ## Schema Diagram
@@ -76,7 +112,10 @@ girltea/
 available as [SVG](schema/schema-diagram.svg) and editable
 [Mermaid source](schema/schema-diagram.mmd).
 
-## Data Model (14 tables)
+> The schema diagram above predates migrations `025`–`029`; the tables/columns
+> those add (below) aren't drawn in it yet.
+
+## Data Model (16 tables)
 
 ### Users & Identity
 
@@ -88,7 +127,7 @@ available as [SVG](schema/schema-diagram.svg) and editable
 
 | Table | Purpose |
 |---|---|
-| `groups` | Name, description, policy (`WOMEN_ONLY` / `MIXED` / `GENDER_NEUTRAL`), visibility (`LINK_ONLY` / `DISCOVERABLE`), category tags, configurable approval settings (JSON). Member count maintained via trigger. |
+| `groups` | Name, description, policy (`WOMEN_ONLY` / `MIXED` / `GENDER_NEUTRAL`), visibility (`LINK_ONLY` / `DISCOVERABLE`), category tags, configurable approval settings (JSON). Member count maintained via trigger. **Circle identity (`025`):** optional `emoji`, `accent_color`, `cover_image_url` so each circle feels like its own room. |
 | `group_memberships` | Links users to groups. Role: `OWNER` / `ADMIN` / `MEMBER`. Status: `ACTIVE` / `BANNED` / `LEFT`. Composite PK `(group_id, user_id)`. |
 | `group_invites` | Token-based invite links for sharing via WhatsApp etc. Supports expiry, max uses, revocation. |
 
@@ -114,7 +153,9 @@ available as [SVG](schema/schema-diagram.svg) and editable
 |---|---|
 | `posts` | Types: `TEXT`, `IMAGE`, `VIDEO`, `VOICE`. Each media post is standalone. Video/voice max 180 seconds (DB constraint). Soft-delete. |
 | `comments` | Types: `TEXT`, `IMAGE`, `VOICE`. Single-level (no reply threads). Same 3-min voice cap. |
-| `post_upvotes` | Composite PK `(post_id, user_id)` prevents double-taps. Trigger maintains `posts.upvote_count`. |
+| `post_upvotes` | Composite PK `(post_id, user_id)` prevents double-taps. Trigger maintains `posts.upvote_count`. Kept intact as the legacy binary signal. |
+| `post_reactions` (`027`) | Rich reactions — `LOVE` / `HUG` / `CRY` / `LAUGH` / `TEA` / `SPARK` — layered on top of upvotes (not a replacement). A `post_reactions_feed` view exposes reactions joined to the reactor's per-group **alias**, so the UI can say "Rhea & Ananya sent love" without leaking real identity. |
+| `saved_posts` (`026`) | "Memories" — a personal keepsake archive. Composite PK `(user_id, post_id)`, owner-only RLS. A `saved_posts_feed` view powers the Memories screen. |
 | `reports` | Moderation reports against any entity (post, comment, user, group). |
 
 ## Key Design Decisions
@@ -237,6 +278,9 @@ no credit card). Database stores only URL references (`media_url`, `thumbnail_ur
 | `fn_raise_removal_request()` | Creates request + auto-records requester's APPROVE vote |
 | `fn_has_profile()` | Returns whether the current auth user has completed onboarding |
 | `fn_my_profile()` | Returns the current auth user's profile row |
+| `fn_create_group_with_owner()` | Creates a circle + its owner membership atomically. Extended in `025` with optional `emoji` / `accent_color` (old callers still work via defaults) |
+| `fn_create_invite()` (`029`) | Any ACTIVE member mints a shareable invite link; token generated server-side, only its hash stored. Grants no membership — the link still runs the 2-approval join flow |
+| `fn_resolve_invite()` | Resolves an invite token for the landing screen. Extended in `028` to return the inviter's `display_name` ("Niharika saved you a seat") |
 
 ## Getting Started (for new team members)
 
@@ -265,6 +309,9 @@ then indexes/triggers/functions:
 2. Indexes & triggers: `013_indexes`, `014_triggers`
 3. Functions & RPCs: `020_alias_generator`, `015_approval_logic`, `018_removal_logic`,
    `021_hub_rpcs`, `022_moderation`, `023_erasure`, `024_group_slugs`
+4. Additive features (safe to apply last, in order): `025_circle_identity`,
+   `026_saved_posts`, `027_post_reactions`, `028_invite_inviter_name`,
+   `029_create_invite`. All additive — existing reads keep working.
 
 If you have the Supabase CLI and `psql` locally, the loop in `AGENTS.md` applies
 everything in the correct order in one step.
@@ -293,16 +340,41 @@ In **Settings** → **API**, copy:
 
 These go into the Flutter app's Supabase initialization.
 
+### 8. Run the Flutter app
+
+The app reads `SUPABASE_URL` / `SUPABASE_ANON_KEY` from `--dart-define`. Without
+them it defaults to the local Supabase stack (`localhost:54321`).
+
+```bash
+cd app
+flutter pub get
+# Against your live Cloud project (use the publishable/anon key, never service_role):
+flutter run -d chrome \
+  --dart-define=SUPABASE_URL=https://<your-ref>.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=<your-anon-or-publishable-key>
+```
+
+For a passwordless dev sign-in code: `./scripts/dev-code.sh <email>` (local
+stack) or `./scripts/cloud-code.sh <email>` (live Cloud — needs the
+`service_role` key in your environment).
+
+Production deploys automatically: pushing to `main` triggers a Render build from
+`app/Dockerfile` (config in `render.yaml`).
+
 ## What's Not Built Yet
 
 | Area | Status |
 |---|---|
-| Flutter app — auth, group feed, posts (text/image/video/voice), threaded comments, upvotes | Built |
-| Flutter app — group creation, join/approval, removal flows | Not started — next step |
-| Push notifications | Not started |
+| Flutter app — auth, group feed, posts (text/image/video/voice), comments, upvotes | Built |
+| Flutter app — onboarding, circle creation, invite links, join/approval, removal, moderation | Built |
+| Design system + 8 themes + per-theme wallpaper art | Built |
+| Circle identity (emoji/accent), Memories (saved posts), rich reactions — schema | Migrations `025`–`029` exist in-repo; verify they're applied to your Cloud project |
+| Circle identity / Memories / reactions — wired into the app UI | In progress (schema-first; UI surfacing ongoing) |
+| Push notifications (and the mockup's notification bell) | Not built — no backend, intentionally not faked |
+| Login email delivery (Resend SMTP + OTP template) | Separate in-progress dashboard task |
+| 30-day auto-delete purge of old posts | Out of scope — no `expires_at`, no cron; the UI makes no deletion promise |
 | Cloud Function for video duration validation (FFprobe) | Deferred to post-MVP |
-| Image thumbnail generation | Deferred to post-MVP |
-| EXIF stripping for image privacy | Deferred to post-MVP |
+| Image thumbnail generation · EXIF stripping | Deferred to post-MVP |
 
 ## Documentation Index
 
