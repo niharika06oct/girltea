@@ -1,23 +1,53 @@
 # GirlTea
 
-An anonymous community app where people can vent, support each other, and spill tea
-about life — in trusted, closed groups with real approval flows.
+**Private little rooms that make it easy to actually talk to your people again.**
 
-## What This App Does
+Close friendships go quiet as adult life gets busier. You still love these people,
+but the conversation shrinks to "happy birthday ❤️", "omg congrats!", and "let's
+meet soon" — the friends who once knew everything about your life slowly know only
+the headlines. GirlTea is a small set of **invite-only circles** where you
+reconnect with your actual people, mostly through short **video and voice** rather
+than typing.
 
-- Users create a profile (name, DOB, gender, employment) and join **closed groups**
-  (school friends, college friends, work friends, etc.)
-- Groups can be **women-only**, **mixed** (all genders welcome), or **gender-neutral**
-  (gender not even asked)
-- Private groups are **invite-only** (shared via WhatsApp/link); public groups are
-  **discoverable** with a request-to-join flow
-- Joining any group requires **2 members to approve** after reviewing your answers to
-  entry questions — no single person has unilateral power
-- Members can post **text, images, videos, or voice recordings** (video/voice capped
-  at 3 minutes) and comment on posts (text, image, or voice)
-- Removing a member also requires **2 people to agree** (one raises the request, one
-  more approves)
-- Everything is backed by PostgreSQL with Supabase for auth, storage, and RLS
+The product rests on a few principles:
+
+- **Circles are the social structure** — invite-only rooms for a specific set of
+  people who share the context (school friends, gym girls, work friends). You talk
+  about parents with the friends who know the history; work with the friends who
+  understand that world.
+- **Video/voice is the mechanism** — you *tell* your girls something, you don't
+  just post text into a feed.
+- **Ephemerality removes permanence** — tea gets cold; conversations are meant to
+  be temporary (see the roadmap — 30-day expiry is planned, not yet shipped).
+- **Themes create ownership** — each circle feels like its own room.
+- **Memories preserve what matters** — the tension of the whole product:
+  *conversations are temporary, memories are intentional.*
+
+The core loop we're optimizing for: **something happens → "I need to tell my
+girls" → open GirlTea → Spill → they respond → I feel closer to them.** Everything
+in [`ROADMAP.md`](ROADMAP.md) is ranked by how much it improves those 90 seconds.
+
+> **Not a community app.** GirlTea is *not* Reddit-for-women or a place to meet
+> like-minded strangers. It's for maintaining close relationships with people you
+> already know. Discoverable/public groups exist in the schema but are being pulled
+> out of the V1 product surface — see `ROADMAP.md`.
+
+## What's Built Today
+
+- Auth (phone/email OTP), profiles, and **invite-only circles** (school friends,
+  gym girls, work friends, …)
+- Members post **text, images, videos, or voice** (video/voice capped at 3 min) and
+  comment (text, image, voice)
+- A full governance backend — entry questions, **2-member approval** to join,
+  democratic removal, moderation, and right-to-erasure. *Much of this is heavier
+  than a 3-person circle needs; the roadmap trims it for V1.*
+- Design system with 8 themes and per-theme wallpaper art (Flutter web, on Render)
+- Additive schema for circle identity, Memories (`saved_posts`), and rich reactions
+  — landed in the DB, UI surfacing in progress
+- Everything backed by PostgreSQL + Supabase (auth, storage, RLS)
+
+See [`ROADMAP.md`](ROADMAP.md) for what's next and why, and **What's Not Built
+Yet** below for the honest gaps (push notifications, native mobile, 30-day expiry).
 
 ## The Web App & Design System
 
@@ -363,6 +393,9 @@ Production deploys automatically: pushing to `main` triggers a Render build from
 
 ## What's Not Built Yet
 
+The near-term plan and *why* each item is ranked where it is lives in
+[`ROADMAP.md`](ROADMAP.md). Summary of the gaps:
+
 | Area | Status |
 |---|---|
 | Flutter app — auth, group feed, posts (text/image/video/voice), comments, upvotes | Built |
@@ -370,11 +403,16 @@ Production deploys automatically: pushing to `main` triggers a Render build from
 | Design system + 8 themes + per-theme wallpaper art | Built |
 | Circle identity (emoji/accent), Memories (saved posts), rich reactions — schema | Migrations `025`–`029` exist in-repo; verify they're applied to your Cloud project |
 | Circle identity / Memories / reactions — wired into the app UI | In progress (schema-first; UI surfacing ongoing) |
-| Push notifications (and the mockup's notification bell) | Not built — no backend, intentionally not faked |
+| **Native iOS/Android app** | Not built — web-only today. **P0**: the product belongs on phones (`ROADMAP.md`). |
+| **Push notifications** (and the mockup's bell) | Not built — no backend, intentionally not faked. **P0**, and tied to native (web push is unreliable on iOS). |
+| **Bulletproof recording/upload/recovery** (compression, progress, retry, draft recovery) | Not built. **P0** — the hero behaviour; never lose a recording. |
+| Join flow for tiny circles | **Bug**: 2-member quorum can't admit member #2 in a 1-member circle. P0 fix → invited members join immediately (`ROADMAP.md`). |
+| 30-day auto-delete ("tea gets cold") | Not built — no `expires_at`, no cron; the UI makes no deletion promise. **Moved to P1** as core differentiation. |
+| Upvote UI removal · discoverable groups pulled from V1 · minimal onboarding | Planned P1 product cleanup (`ROADMAP.md`); schema stays, product surface shrinks. |
 | Login email delivery (Resend SMTP + OTP template) | Separate in-progress dashboard task |
-| 30-day auto-delete purge of old posts | Out of scope — no `expires_at`, no cron; the UI makes no deletion promise |
 | Cloud Function for video duration validation (FFprobe) | Deferred to post-MVP |
 | Image thumbnail generation · EXIF stripping | Deferred to post-MVP |
+| E2EE, biometric lock, screenshot controls | Later / P1–Later — see `ROADMAP.md` (E2EE is an architecture fork, not a bolt-on). |
 
 ## Documentation Index
 
